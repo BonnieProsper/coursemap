@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from typing import List
+from typing import Set
 
 from coursemap.domain.plan import DegreePlan
 from coursemap.domain.degree_requirements import DegreeRequirements
+from coursemap.domain.electives import ElectivePool
 
 
 class ValidationError(Exception):
@@ -50,9 +51,6 @@ class LevelCreditRule(ValidationRule):
                     f"Level {level} credits {level_totals[level]} "
                     f"< required {requirement.min_credits}"
                 )
-
-from typing import Set
-from coursemap.domain.electives import ElectivePool
 
 
 class CoreCourseRule(ValidationRule):

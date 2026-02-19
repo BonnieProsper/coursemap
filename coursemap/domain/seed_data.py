@@ -15,7 +15,6 @@ def build_seed_courses() -> Dict[str, Course]:
 
         return [
             Offering(
-                year=2026,
                 semester=s,
                 campus="PN",
                 mode="internal",

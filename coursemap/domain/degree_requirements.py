@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Set
+
 from coursemap.domain.electives import ElectivePool
 
 
@@ -13,5 +14,6 @@ class LevelCreditRequirement:
 class DegreeRequirements:
     total_credits: int
     level_requirements: Dict[int, LevelCreditRequirement]
-    core_courses: Set[str]
-    elective_pools: List[ElectivePool]
+
+    core_courses: Set[str] = field(default_factory=set)
+    elective_pools: List[ElectivePool] = field(default_factory=list)

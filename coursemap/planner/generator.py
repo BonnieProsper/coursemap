@@ -2,18 +2,12 @@ from typing import Dict, List, Set
 
 from coursemap.domain.course import Course
 from coursemap.domain.plan import DegreePlan, SemesterPlan
-from coursemap.planner.graph import PrerequisiteGraph
 
 
 class PlanGenerator:
     """
-    Deterministic, prerequisite-aware, offering-aware scheduler.
-
-    Properties:
-    - Allows empty semesters
-    - Advances time indefinitely until completion
-    - Detects true impossibility (no future offering exists)
-    - Deterministic ordering
+    Deterministic prerequisite-aware scheduler.
+    Offerings are year-agnostic (repeat annually).
     """
 
     def __init__(
@@ -30,9 +24,6 @@ class PlanGenerator:
         self.mode = mode
         self.start_year = start_year
 
-        # validates DAG on construction
-        self.graph = PrerequisiteGraph(courses)
-
     def generate(self) -> DegreePlan:
         remaining: Set[str] = set(self.courses.keys())
         completed: Set[str] = set()
@@ -42,20 +33,32 @@ class PlanGenerator:
         semester_cycle = ["S1", "S2"]
         semester_index = 0
 
-        # safety guard against infinite loops
-        max_semesters = 50
+        max_semesters = 20  # hard safety bound
 
         while remaining:
             if semester_index > max_semesters:
-                raise ValueError("Exceeded maximum scheduling horizon.")
+                raise ValueError(
+                    "Scheduling exceeded safe horizon. "
+                    "Possible unsatisfiable prerequisites or offerings."
+                )
 
             semester_name = semester_cycle[semester_index % 2]
             current_year = base_year + (semester_index // 2)
             semester_index += 1
 
             eligible = self._eligible_courses(
-                remaining, completed, current_year, semester_name
+                remaining, completed, semester_name
             )
+
+            if not eligible:
+                # If nothing eligible this semester, try next semester
+                # But detect global deadlock
+                if not self._any_future_possible(remaining, completed):
+                    raise ValueError(
+                        "No schedulable courses remain. "
+                        "Prerequisite or offering deadlock detected."
+                    )
+                continue
 
             semester_courses = []
             credits = 0
@@ -69,10 +72,12 @@ class PlanGenerator:
                 semester_courses.append(course)
                 credits += course.credits
 
-            if semester_courses:
-                for course in semester_courses:
-                    remaining.remove(course.code)
-                    completed.add(course.code)
+            if not semester_courses:
+                continue
+
+            for course in semester_courses:
+                remaining.remove(course.code)
+                completed.add(course.code)
 
             semesters.append(
                 SemesterPlan(
@@ -82,18 +87,12 @@ class PlanGenerator:
                 )
             )
 
-            # Detect true impossibility:
-            # If no remaining course can EVER be offered again
-            if not semester_courses and not self._future_possible(remaining):
-                raise ValueError("No remaining courses can be scheduled in future.")
-
         return DegreePlan(semesters)
 
     def _eligible_courses(
         self,
         remaining: Set[str],
         completed: Set[str],
-        year: int,
         semester: str,
     ) -> List[str]:
         eligible = []
@@ -101,11 +100,16 @@ class PlanGenerator:
         for code in remaining:
             course = self.courses[code]
 
-            if not course.is_offered(year, semester, self.campus, self.mode):
+            if not course.is_offered(
+                semester=semester,
+                campus=self.campus,
+                mode=self.mode,
+            ):
                 continue
 
-            if course.prerequisites and not course.prerequisites.is_satisfied(
-                completed
+            if (
+                course.prerequisites
+                and not course.prerequisites.is_satisfied(completed)
             ):
                 continue
 
@@ -113,13 +117,22 @@ class PlanGenerator:
 
         return eligible
 
-    def _future_possible(self, remaining: Set[str]) -> bool:
+    def _any_future_possible(
+        self,
+        remaining: Set[str],
+        completed: Set[str],
+    ) -> bool:
         """
-        Checks whether any remaining course has any offering
-        in any semester in future years.
+        Detect global deadlock:
+        Is there ANY course whose prerequisites are satisfied?
         """
         for code in remaining:
             course = self.courses[code]
-            if course.offerings:
+
+            if (
+                not course.prerequisites
+                or course.prerequisites.is_satisfied(completed)
+            ):
                 return True
+
         return False

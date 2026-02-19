@@ -7,7 +7,6 @@ from .prerequisite import PrerequisiteExpression
 
 @dataclass(frozen=True)
 class Offering:
-    year: int
     semester: str  # "S1", "S2", "SS"
     campus: str
     mode: str  # "internal" or "distance"
@@ -24,14 +23,12 @@ class Course:
 
     def is_offered(
         self,
-        year: int,
         semester: str,
         campus: str,
         mode: str,
     ) -> bool:
         return any(
-            o.year == year
-            and o.semester == semester
+            o.semester == semester
             and o.campus == campus
             and o.mode == mode
             for o in self.offerings
