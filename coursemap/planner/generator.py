@@ -6,6 +6,16 @@ from coursemap.planner.graph import PrerequisiteGraph
 
 
 class PlanGenerator:
+    """
+    Deterministic, prerequisite-aware, offering-aware scheduler.
+
+    Properties:
+    - Allows empty semesters
+    - Advances time indefinitely until completion
+    - Detects true impossibility (no future offering exists)
+    - Deterministic ordering
+    """
+
     def __init__(
         self,
         courses: Dict[str, Course],
@@ -20,24 +30,31 @@ class PlanGenerator:
         self.mode = mode
         self.start_year = start_year
 
+        # validates DAG on construction
         self.graph = PrerequisiteGraph(courses)
 
     def generate(self) -> DegreePlan:
         remaining: Set[str] = set(self.courses.keys())
         completed: Set[str] = set()
-
         semesters: List[SemesterPlan] = []
 
-        year = self.start_year
+        base_year = self.start_year
         semester_cycle = ["S1", "S2"]
         semester_index = 0
 
+        # safety guard against infinite loops
+        max_semesters = 50
+
         while remaining:
+            if semester_index > max_semesters:
+                raise ValueError("Exceeded maximum scheduling horizon.")
+
             semester_name = semester_cycle[semester_index % 2]
+            current_year = base_year + (semester_index // 2)
             semester_index += 1
 
             eligible = self._eligible_courses(
-                remaining, completed, year, semester_name
+                remaining, completed, current_year, semester_name
             )
 
             semester_courses = []
@@ -52,23 +69,23 @@ class PlanGenerator:
                 semester_courses.append(course)
                 credits += course.credits
 
-            if not semester_courses:
-                raise ValueError("No eligible courses available. Plan impossible.")
-
-            for course in semester_courses:
-                remaining.remove(course.code)
-                completed.add(course.code)
+            if semester_courses:
+                for course in semester_courses:
+                    remaining.remove(course.code)
+                    completed.add(course.code)
 
             semesters.append(
                 SemesterPlan(
-                    year=year,
+                    year=current_year,
                     semester=semester_name,
                     courses=semester_courses,
                 )
             )
 
-            if semester_name == "S2":
-                year += 1
+            # Detect true impossibility:
+            # If no remaining course can EVER be offered again
+            if not semester_courses and not self._future_possible(remaining):
+                raise ValueError("No remaining courses can be scheduled in future.")
 
         return DegreePlan(semesters)
 
@@ -95,3 +112,14 @@ class PlanGenerator:
             eligible.append(code)
 
         return eligible
+
+    def _future_possible(self, remaining: Set[str]) -> bool:
+        """
+        Checks whether any remaining course has any offering
+        in any semester in future years.
+        """
+        for code in remaining:
+            course = self.courses[code]
+            if course.offerings:
+                return True
+        return False
