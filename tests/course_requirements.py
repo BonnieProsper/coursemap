@@ -28,8 +28,22 @@ def build_realistic_requirements():
             ),
             ElectivePool(
                 name="Advanced Electives",
-                course_codes={"STAT301", "DATA301", "COMP301"},
+                course_codes={"STAT201", "MATH201", "DATA301", "AI301"},
+                min_select=2,
+                max_select=2,
                 min_credits=15,
-            ),
+            )
         ],
+    )
+
+
+def build_massey_bsc_requirements() -> DegreeRequirements:
+    return DegreeRequirements(
+        total_credits=360,
+        max_100_level=165,
+        min_300_level=75,
+        level_requirements={},
+        core_courses=set(),  # schedule A handled separately
+        elective_pools=[],
+        required_majors=1,
     )

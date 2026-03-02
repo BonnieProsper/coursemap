@@ -21,12 +21,14 @@ def test_degree_validation_passes():
     plan = generator.generate()
 
     requirements = DegreeRequirements(
-        total_credits=105,
+        total_credits=165,  # must match seed dataset
         level_requirements={
             100: LevelCreditRequirement(100, 60),
-            200: LevelCreditRequirement(200, 30),
-            300: LevelCreditRequirement(300, 15),
+            200: LevelCreditRequirement(200, 60),
+            300: LevelCreditRequirement(300, 45),
         },
+        core_courses=set(courses.keys()),
+        elective_pools=[],
     )
 
     validator = DegreeValidator(

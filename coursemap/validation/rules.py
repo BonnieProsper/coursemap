@@ -86,3 +86,100 @@ class ElectivePoolRule(ValidationRule):
                 f"Elective pool '{self.pool.name}' requires "
                 f"{self.pool.min_credits} credits, got {credits}"
             )
+
+
+class Max100LevelRule(ValidationRule):
+    def __init__(self, requirements):
+        self.requirements = requirements
+
+    def validate(self, plan: DegreePlan) -> None:
+        if self.requirements.max_100_level is None:
+            return
+
+        total_100 = sum(
+            c.credits
+            for s in plan.semesters
+            for c in s.courses
+            if c.level == 100
+        )
+
+        if total_100 > self.requirements.max_100_level:
+            raise ValidationError(
+                f"100-level credits {total_100} exceed max {self.requirements.max_100_level}"
+            )
+        
+
+class Min300LevelRule(ValidationRule):
+    def __init__(self, requirements):
+        self.requirements = requirements
+
+    def validate(self, plan: DegreePlan) -> None:
+        if self.requirements.min_300_level is None:
+            return
+
+        total_300 = sum(
+            c.credits
+            for s in plan.semesters
+            for c in s.courses
+            if c.level == 300
+        )
+
+        if total_300 < self.requirements.min_300_level:
+            raise ValidationError(
+                f"300-level credits {total_300} below required {self.requirements.min_300_level}"
+            )
+        
+
+class MajorCompletionRule(ValidationRule):
+    def __init__(self, requirements):
+        self.requirements = requirements
+
+    def validate(self, plan: DegreePlan) -> None:
+        majors_completed = 0
+
+        plan_courses = {
+            c.code
+            for s in plan.semesters
+            for c in s.courses
+        }
+
+        for major in self.requirements.available_majors:
+            major_courses = plan_courses.intersection(major.required_courses)
+
+            total = sum(
+                c.credits
+                for s in plan.semesters
+                for c in s.courses
+                if c.code in major_courses
+            )
+
+            credits_200 = sum(
+                c.credits
+                for s in plan.semesters
+                for c in s.courses
+                if c.code in major_courses and c.level == 200
+            )
+
+            credits_300 = sum(
+                c.credits
+                for s in plan.semesters
+                for c in s.courses
+                if c.code in major_courses and c.level == 300
+            )
+
+            if (
+                total >= major.total_credits
+                and credits_200 >= major.min_200_level
+                and credits_300 >= major.min_300_level
+            ):
+                majors_completed += 1
+
+        if majors_completed < self.requirements.required_majors:
+            raise ValidationError("Major requirements not satisfied")
+        
+
+# TODO: fix binary validation with internal errors e.g
+"""ValidationResult:
+    - passed: bool
+    - errors: List[ValidationIssue]"""
+# TODO: contraint integration 

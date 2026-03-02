@@ -6,7 +6,7 @@ from coursemap.domain.degree_requirements import (
 from coursemap.domain.electives import ElectivePool
 from coursemap.planner.generator import PlanGenerator
 from coursemap.optimisation.search import ExhaustivePlanSearch
-
+from .course_requirements import build_realistic_requirements
 
 def test_exhaustive_search_returns_valid_plan():
     courses = build_seed_courses()
@@ -34,3 +34,25 @@ def test_exhaustive_search_returns_valid_plan():
 
     assert plan is not None
     assert len(plan.semesters) > 0
+
+
+def test_realistic_search():
+    courses = build_seed_courses()
+    requirements = build_realistic_requirements()
+
+    generator = PlanGenerator(courses)
+
+    search = ExhaustivePlanSearch(
+        courses,
+        requirements,
+        generator,
+    )
+
+    plan = search.search()
+
+    assert plan is not None
+    assert sum(
+        c.credits
+        for s in plan.semesters
+        for c in s.courses
+    ) == 120
