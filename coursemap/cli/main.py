@@ -1,16 +1,24 @@
-from coursemap.domain.seed_data import load_massey_bachelor
+import pprint
+
+from coursemap.domain.seed_data import (
+    build_course_catalog,
+    build_bsc_requirements,
+)
 from coursemap.services.planner_service import PlannerService
 
 
 def main():
-    config = load_massey_bachelor()
-    service = PlannerService(config)
+    courses = build_course_catalog()
+    requirements = build_bsc_requirements()
 
-    plan = service.generate_best_plan(
-        major="Computer Science"
-    )
+    service = PlannerService(courses, requirements)
+    plan = service.generate_best_plan()
 
-    print(plan)
+    for semester in plan.semesters:
+        print(f"{semester.year} {semester.semester}")
+        for course in semester.courses:
+            print(f"   {course.code}")
+        print()
 
 
 if __name__ == "__main__":
