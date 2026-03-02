@@ -18,7 +18,7 @@ class DegreeRequirements:
     max_100_level: Optional[int]
     min_300_level: Optional[int]
 
-    # Per-level minimums (optional)
+    # Per-level minimums
     level_requirements: Dict[int, LevelCreditRequirement]
 
     # Core & schedule rules

@@ -4,10 +4,10 @@ from coursemap.domain.course import Course, Offering
 from coursemap.domain.prerequisite import CourseRequirement
 from coursemap.domain.degree_requirements import (
     DegreeRequirements,
-    LevelRequirement,
-    MajorRequirement,
+    LevelCreditRequirement,
 )
 from coursemap.domain.electives import ElectivePool
+from coursemap.domain.major import Major
 
 
 # --------------------------------------------------
@@ -25,8 +25,8 @@ def build_course_catalog() -> Dict[str, Course]:
     return {
 
         # 100-level
-        "MATH101": Course("MATH101", "Calculus I", 15, 100, _offering(["S1", "S2"])),
         "STAT101": Course("STAT101", "Statistics I", 15, 100, _offering(["S1", "S2"])),
+        "MATH101": Course("MATH101", "Calculus I", 15, 100, _offering(["S1", "S2"])),
         "COMP101": Course("COMP101", "Programming I", 15, 100, _offering(["S1", "S2"])),
 
         # 200-level
@@ -72,13 +72,12 @@ def build_course_catalog() -> Dict[str, Course]:
 def build_bsc_requirements() -> DegreeRequirements:
 
     level_requirements = {
-        100: LevelRequirement(min_credits=0),
-        200: LevelRequirement(min_credits=90),
-        300: LevelRequirement(min_credits=90),
+        200: LevelCreditRequirement(level=200, min_credits=30),
+        300: LevelCreditRequirement(level=300, min_credits=30),
     }
 
-    major = MajorRequirement(
-        name="Statistics Major",
+    statistics_major = Major(
+        name="Statistics",
         required_courses={
             "STAT201",
             "STAT202",
@@ -103,11 +102,12 @@ def build_bsc_requirements() -> DegreeRequirements:
 
     return DegreeRequirements(
         total_credits=180,
-        level_requirements=level_requirements,
-        core_courses={"STAT101"},
-        elective_pools=[elective_pool],
-        available_majors=[major],
-        required_majors=1,
         max_100_level=90,
         min_300_level=45,
+        level_requirements=level_requirements,
+        core_courses={"STAT101"},
+        min_schedule_credits=None,
+        required_majors=1,
+        available_majors=[statistics_major],
+        elective_pools=[elective_pool],
     )
