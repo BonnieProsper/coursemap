@@ -73,7 +73,7 @@ def build_bsc_requirements() -> DegreeRequirements:
 
     level_requirements = {
         200: LevelCreditRequirement(level=200, min_credits=30),
-        300: LevelCreditRequirement(level=300, min_credits=30),
+        300: LevelCreditRequirement(level=300, min_credits=45),
     }
 
     statistics_major = Major(
@@ -89,8 +89,8 @@ def build_bsc_requirements() -> DegreeRequirements:
         min_300_level=30,
     )
 
-    elective_pool = ElectivePool(
-        name="Science Electives",
+    elective_pool_1 = ElectivePool(
+        name="Science Electives A",
         course_codes={
             "MATH101",
             "COMP101",
@@ -98,6 +98,17 @@ def build_bsc_requirements() -> DegreeRequirements:
             "COMP301",
         },
         min_credits=60,
+    )
+
+    elective_pool_2 = ElectivePool(
+        name="Science Electives B",
+        course_codes={
+            "MATH101",
+            "COMP101",
+            "COMP201",
+            "COMP301",
+        },
+        min_credits=45,
     )
 
     return DegreeRequirements(
@@ -109,5 +120,5 @@ def build_bsc_requirements() -> DegreeRequirements:
         min_schedule_credits=None,
         required_majors=1,
         available_majors=[statistics_major],
-        elective_pools=[elective_pool],
+        elective_pools=[elective_pool_1, elective_pool_2],
     )
