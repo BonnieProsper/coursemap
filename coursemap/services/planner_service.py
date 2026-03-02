@@ -10,14 +10,20 @@ class PlannerService:
         self.courses = courses
         self.requirements = requirements
 
-    def generate_best_plan(self) -> DegreePlan:
+    def generate_best_plan(
+        self,
+        max_credits_per_semester: int = 60,
+        campus: str = "PN",
+        mode: str = "internal",
+        start_year: int = 2026,
+    ):
 
         generator_template = PlanGenerator(
             self.courses,
-            max_credits_per_semester=60,
-            campus="PN",
-            mode="internal",
-            start_year=2026,
+            max_credits_per_semester=max_credits_per_semester,
+            campus=campus,
+            mode=mode,
+            start_year=start_year,
         )
 
         search = ExhaustivePlanSearch(
@@ -26,6 +32,4 @@ class PlannerService:
             generator_template=generator_template,
         )
 
-        best_plan = search.search()
-
-        return best_plan
+        return search.search()

@@ -1,3 +1,5 @@
+import argparse
+
 from coursemap.domain.seed_data import (
     build_course_catalog,
     build_bsc_requirements,
@@ -17,11 +19,19 @@ from coursemap.validation.rules import (
 
 
 def main():
+    parser = argparse.ArgumentParser(description="CourseMap Degree Planner")
+    parser.add_argument("--max-credits", type=int, default=60)
+    parser.add_argument("--start-year", type=int, default=2026)
+    args = parser.parse_args()
+
     courses = build_course_catalog()
     requirements = build_bsc_requirements()
 
     service = PlannerService(courses, requirements)
-    plan = service.generate_best_plan()
+    plan = service.generate_best_plan(
+        max_credits_per_semester=args.max_credits,
+        start_year=args.start_year,
+    )
 
     print("\n===== GENERATED DEGREE PLAN =====\n")
 
