@@ -15,7 +15,7 @@ from coursemap.validation.rules import (
     Min300LevelRule,
     MajorCompletionRule,
 )
-
+from coursemap.optimisation.scorer import PlanScorer
 
 class ExhaustivePlanSearch:
     """
@@ -35,7 +35,7 @@ class ExhaustivePlanSearch:
 
     def search(self) -> DegreePlan:
         best_plan: Optional[DegreePlan] = None
-        best_score: Optional[int] = None
+        best_score: Optional[float] = None
 
         elective_combinations = self._generate_elective_combinations()
 
@@ -104,13 +104,22 @@ class ExhaustivePlanSearch:
     def _build_course_subset(self, electives: List[str]) -> Dict[str, Course]:
         selected: Dict[str, Course] = {}
 
+        # Core courses
         for code in self.requirements.core_courses:
             selected[code] = self.courses[code]
 
+        # Major required courses (we assume first major for now)
+        if self.requirements.available_majors:
+            major = self.requirements.available_majors[0]
+            for code in major.required_courses:
+                selected[code] = self.courses[code]
+
+        # Electives
         for code in electives:
             selected[code] = self.courses[code]
 
         return selected
+
 
     def _validate(self, plan: DegreePlan) -> None:
         rules = [
@@ -128,9 +137,6 @@ class ExhaustivePlanSearch:
         validator = DegreeValidator(rules)
         validator.validate(plan)
 
-    def _score(self, plan: DegreePlan) -> int:
-        """
-        Score function:
-        Minimise number of semesters (shortest duration).
-        """
-        return len(plan.semesters)
+    def _score(self, plan: DegreePlan) -> float:
+        scorer = PlanScorer()
+        return scorer.score(plan)
