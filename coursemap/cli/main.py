@@ -1,4 +1,5 @@
 import argparse
+import json
 
 from coursemap.domain.seed_data import (
     build_course_catalog,
@@ -32,6 +33,20 @@ def main():
         max_credits_per_semester=args.max_credits,
         start_year=args.start_year,
     )
+
+    plan_data = []
+
+    for semester in plan.semesters:
+        plan_data.append({
+            "year": semester.year,
+            "semester": semester.semester,
+            "courses": [c.code for c in semester.courses],
+        })
+
+    with open("generated_plan.json", "w") as f:
+        json.dump(plan_data, f, indent=2)
+
+    print("Plan exported to generated_plan.json")
 
     print("\n===== GENERATED DEGREE PLAN =====\n")
 
