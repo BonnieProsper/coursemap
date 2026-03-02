@@ -11,6 +11,9 @@ from coursemap.validation.rules import (
     LevelCreditRule,
     CoreCourseRule,
     ElectivePoolRule,
+    Max100LevelRule,
+    Min300LevelRule,
+    MajorCompletionRule,
 )
 
 
@@ -114,6 +117,9 @@ class ExhaustivePlanSearch:
             TotalCreditRule(self.requirements),
             LevelCreditRule(self.requirements),
             CoreCourseRule(self.requirements.core_courses),
+            Max100LevelRule(self.requirements),
+            Min300LevelRule(self.requirements),
+            MajorCompletionRule(self.requirements),
         ]
 
         for pool in self.requirements.elective_pools:
