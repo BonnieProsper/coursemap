@@ -1,20 +1,32 @@
-import statistics
+from coursemap.domain.plan import DegreePlan
 
 
 class PlanScorer:
-    def score(self, plan) -> float:
-        semester_credits = [
-            sum(c.credits for c in s.courses)
-            for s in plan.semesters
+    """
+    Lower score = better plan.
+    """
+
+    def score(self, plan: DegreePlan) -> float:
+        semesters = plan.semesters
+
+        if not semesters:
+            return float("inf")
+
+        total_semesters = len(semesters)
+
+        credit_loads = [
+            s.total_credits() for s in semesters
         ]
 
-        if not semester_credits:
-            return 0
+        max_load = max(credit_loads)
+        min_load = min(credit_loads)
 
-        variance_penalty = statistics.pvariance(semester_credits)
+        imbalance_penalty = max_load - min_load
 
-        empty_semester_penalty = semester_credits.count(0) * 50
+        final_semester_penalty = semesters[-1].total_credits()
 
-        total_score = variance_penalty + empty_semester_penalty
+        semester_penalty = total_semesters * 100
+        spread_penalty = imbalance_penalty * 5
+        final_penalty = final_semester_penalty * 2
 
-        return total_score
+        return semester_penalty + spread_penalty + final_penalty

@@ -8,7 +8,8 @@ from coursemap.domain.major import Major
 @dataclass(frozen=True)
 class LevelCreditRequirement:
     level: int
-    min_credits: int
+    min_credits: Optional[int] = None
+    max_credits: Optional[int] = None
 
 
 @dataclass(frozen=True)

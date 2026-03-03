@@ -12,8 +12,6 @@ from coursemap.validation.rules import (
     LevelCreditRule,
     CoreCourseRule,
     ElectivePoolRule,
-    Max100LevelRule,
-    Min300LevelRule,
     MajorCompletionRule,
     AllowedCourseRule,
 )
@@ -44,6 +42,11 @@ class ExhaustivePlanSearch:
         self.failure_breakdown = defaultdict(int)
 
     def search(self) -> DegreePlan:
+        self.total_attempts = 0
+        self.generation_failures = 0
+        self.validation_failures = 0
+        self.failure_breakdown.clear()
+
         best_plan: Optional[DegreePlan] = None
         best_score: Optional[float] = None
 
@@ -51,38 +54,42 @@ class ExhaustivePlanSearch:
 
         print(f"Total elective combinations to evaluate: {len(elective_combinations)}")
 
-        for elective_set in elective_combinations:
-            self.total_attempts += 1
+        for major in self.requirements.available_majors:
+            for elective_set in elective_combinations:
+                self.total_attempts += 1
 
-            selected_courses = self._build_course_subset(elective_set)
+                selected_courses = self._build_course_subset(elective_set, major)
 
-            generator = PlanGenerator(
-                selected_courses,
-                max_credits_per_semester=self.generator_template.max_credits,
-                campus=self.generator_template.campus,
-                mode=self.generator_template.mode,
-                start_year=self.generator_template.start_year,
-            )
+                if not self._quick_credit_check(selected_courses):
+                    continue
 
-            try:
-                plan = generator.generate()
-            except Exception:
-                self.generation_failures += 1
-                continue
+                generator = PlanGenerator(
+                    selected_courses,
+                    max_credits_per_semester=self.generator_template.max_credits,
+                    campus=self.generator_template.campus,
+                    mode=self.generator_template.mode,
+                    start_year=self.generator_template.start_year,
+                )
 
-            validation_result = self._validate(plan)
+                try:
+                    plan = generator.generate()
+                except Exception:
+                    self.generation_failures += 1
+                    continue
 
-            if not validation_result.passed:
-                self.validation_failures += 1
-                for error in validation_result.errors:
-                    self.failure_breakdown[error] += 1
-                continue
+                validation_result = self._validate(plan)
 
-            score = self._score(plan)
+                if not validation_result.passed:
+                    self.validation_failures += 1
+                    for error in validation_result.errors:
+                        self.failure_breakdown[error] += 1
+                    continue
 
-            if best_score is None or score < best_score:
-                best_plan = plan
-                best_score = score
+                score = self._score(plan)
+
+                if best_score is None or score < best_score:
+                    best_plan = plan
+                    best_score = score
 
         self._print_diagnostics()
 
@@ -126,18 +133,16 @@ class ExhaustivePlanSearch:
 
         return results
 
-    def _build_course_subset(self, electives: List[str]) -> Dict[str, Course]:
+    def _build_course_subset(self, electives: List[str], major) -> Dict[str, Course]:
         selected: Dict[str, Course] = {}
 
-        # Core courses
+        # Core
         for code in self.requirements.core_courses:
             selected[code] = self.courses[code]
 
-        # Major required courses (first major only for now)
-        if self.requirements.available_majors:
-            major = self.requirements.available_majors[0]
-            for code in major.required_courses:
-                selected[code] = self.courses[code]
+        # Selected major
+        for code in major.required_courses:
+            selected[code] = self.courses[code]
 
         # Electives
         for code in electives:
@@ -150,8 +155,6 @@ class ExhaustivePlanSearch:
             TotalCreditRule(self.requirements),
             LevelCreditRule(self.requirements),
             CoreCourseRule(self.requirements.core_courses),
-            Max100LevelRule(self.requirements),
-            Min300LevelRule(self.requirements),
             MajorCompletionRule(self.requirements),
             AllowedCourseRule(self.requirements),
         ]
@@ -181,3 +184,12 @@ class ExhaustivePlanSearch:
                 reverse=True,
             ):
                 print(f"  {count}x - {error}")
+
+        success = self.total_attempts - self.generation_failures - self.validation_failures
+        rate = success / self.total_attempts if self.total_attempts else 0
+        print(f"Success Rate: {rate:.2%}")
+
+
+    def _quick_credit_check(self, selected_courses: Dict[str, Course]) -> bool:
+        total = sum(c.credits for c in selected_courses.values())
+        return total == self.requirements.total_credits

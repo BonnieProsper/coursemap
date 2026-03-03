@@ -46,12 +46,19 @@ class LevelCreditRule(ValidationRule):
                 level_totals[course.level] += course.credits
 
         for level, requirement in self.requirements.level_requirements.items():
-            if level_totals[level] < requirement.min_credits:
-                raise ValidationError(
-                    f"Level {level} credits {level_totals[level]} "
-                    f"< required {requirement.min_credits}"
-                )
+            total = level_totals[level]
 
+            if requirement.min_credits is not None:
+                if total < requirement.min_credits:
+                    raise ValidationError(
+                        f"Level {level} credits {total} < required {requirement.min_credits}"
+                    )
+
+            if requirement.max_credits is not None:
+                if total > requirement.max_credits:
+                    raise ValidationError(
+                        f"Level {level} credits {total} > allowed {requirement.max_credits}"
+                    )
 
 class CoreCourseRule(ValidationRule):
     def __init__(self, core_courses: Set[str]):
@@ -89,27 +96,6 @@ class ElectivePoolRule(ValidationRule):
                 f"{self.pool.min_credits} credits, got {credits}"
             )
 
-
-class Max100LevelRule(ValidationRule):
-    def __init__(self, requirements):
-        self.requirements = requirements
-
-    def validate(self, plan: DegreePlan) -> None:
-        if self.requirements.max_100_level is None:
-            return
-
-        total_100 = sum(
-            c.credits
-            for s in plan.semesters
-            for c in s.courses
-            if c.level == 100
-        )
-
-        if total_100 > self.requirements.max_100_level:
-            raise ValidationError(
-                f"100-level credits {total_100} exceed max {self.requirements.max_100_level}"
-            )
-        
 
 class MajorCompletionRule(ValidationRule):
     def __init__(self, requirements):

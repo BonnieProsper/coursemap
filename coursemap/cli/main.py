@@ -13,8 +13,6 @@ from coursemap.validation.rules import (
     LevelCreditRule,
     CoreCourseRule,
     ElectivePoolRule,
-    Max100LevelRule,
-    Min300LevelRule,
     MajorCompletionRule,
 )
 
@@ -25,7 +23,8 @@ def main():
     parser.add_argument("--start-year", type=int, default=2026)
     args = parser.parse_args()
 
-    courses = build_course_catalog()
+    courses = build_course_catalog() 
+    # TODO: courses = load_courses_from_json("data/dataset.json")
     requirements = build_bsc_requirements()
 
     service = PlannerService(courses, requirements)
@@ -74,8 +73,6 @@ def main():
         TotalCreditRule(requirements),
         LevelCreditRule(requirements),
         CoreCourseRule(requirements.core_courses),
-        Max100LevelRule(requirements),
-        Min300LevelRule(requirements),
         MajorCompletionRule(requirements),
     ]
 
