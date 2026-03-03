@@ -14,6 +14,7 @@ from coursemap.validation.rules import (
     Max100LevelRule,
     Min300LevelRule,
     MajorCompletionRule,
+    AllowedCourseRule
 )
 from coursemap.optimisation.scorer import PlanScorer
 
@@ -92,7 +93,7 @@ class ExhaustivePlanSearch:
                         continue  # soft upper bound
 
                     valid_combos.append(list(combo))
-                    
+
             all_pool_selections.append(valid_combos)
 
         # Cartesian product across pools
@@ -135,6 +136,7 @@ class ExhaustivePlanSearch:
             Max100LevelRule(self.requirements),
             Min300LevelRule(self.requirements),
             MajorCompletionRule(self.requirements),
+            AllowedCourseRule(self.requirements),
         ]
 
         for pool in self.requirements.elective_pools:

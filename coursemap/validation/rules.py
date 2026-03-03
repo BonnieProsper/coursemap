@@ -180,8 +180,23 @@ class MajorCompletionRule(ValidationRule):
             raise ValidationError("Major requirements not satisfied")
         
 
+class AllowedCourseRule(ValidationRule):
+    def __init__(self, requirements: DegreeRequirements):
+        self.allowed = (
+            requirements.core_courses
+            | set().union(*(m.required_courses for m in requirements.available_majors))
+            | set().union(*(p.course_codes for p in requirements.elective_pools))
+        )
+
+    def validate(self, plan: DegreePlan) -> None:
+        for s in plan.semesters:
+            for c in s.courses:
+                if c.code not in self.allowed:
+                    raise ValidationError(f"Course {c.code} not allowed by degree")
+
+
 # TODO: fix binary validation with internal errors e.g
 """ValidationResult:
     - passed: bool
     - errors: List[ValidationIssue]"""
-# TODO: contraint integration 
+# TODO: constraint integration 
