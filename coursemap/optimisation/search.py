@@ -53,8 +53,10 @@ class ExhaustivePlanSearch:
 
             try:
                 plan = generator.generate()
-                self._validate(plan)
             except Exception:
+                continue
+
+            if not self._validate(plan):
                 continue
 
             score = self._score(plan)
@@ -128,7 +130,7 @@ class ExhaustivePlanSearch:
         return selected
 
 
-    def _validate(self, plan: DegreePlan) -> None:
+    def _validate(self, plan: DegreePlan) -> bool:
         rules = [
             TotalCreditRule(self.requirements),
             LevelCreditRule(self.requirements),
@@ -143,7 +145,9 @@ class ExhaustivePlanSearch:
             rules.append(ElectivePoolRule(pool))
 
         validator = DegreeValidator(rules)
-        validator.validate(plan)
+        result = validator.validate(plan)
+
+        return result.passed
 
     def _score(self, plan: DegreePlan) -> float:
         scorer = PlanScorer()
