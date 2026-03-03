@@ -111,27 +111,6 @@ class Max100LevelRule(ValidationRule):
             )
         
 
-class Min300LevelRule(ValidationRule):
-    def __init__(self, requirements):
-        self.requirements = requirements
-
-    def validate(self, plan: DegreePlan) -> None:
-        if self.requirements.min_300_level is None:
-            return
-
-        total_300 = sum(
-            c.credits
-            for s in plan.semesters
-            for c in s.courses
-            if c.level == 300
-        )
-
-        if total_300 < self.requirements.min_300_level:
-            raise ValidationError(
-                f"300-level credits {total_300} below required {self.requirements.min_300_level}"
-            )
-        
-
 class MajorCompletionRule(ValidationRule):
     def __init__(self, requirements):
         self.requirements = requirements
