@@ -30,7 +30,7 @@ class PlanGenerator:
         semesters: List[SemesterPlan] = []
 
         base_year = self.start_year
-        semester_cycle = ["S1", "S2"]
+        semester_cycle = ["S1", "S2", "SS"]
         semester_index = 0
 
         max_semesters = 20  # hard safety bound
