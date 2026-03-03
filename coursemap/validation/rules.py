@@ -74,6 +74,8 @@ class ElectivePoolRule(ValidationRule):
         self.pool = pool
 
     def validate(self, plan: DegreePlan) -> None:
+        # TODO: exclude courses already counted as core/major
+
         credits = 0
 
         for semester in plan.semesters:

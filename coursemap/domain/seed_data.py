@@ -1,3 +1,7 @@
+"""
+Seed data for deterministic testing and development.
+NOT scraped real university data.
+"""
 from typing import Dict, List
 
 from coursemap.domain.course import Course, Offering

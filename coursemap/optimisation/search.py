@@ -84,9 +84,15 @@ class ExhaustivePlanSearch:
             for r in range(1, len(pool_courses) + 1):
                 for combo in combinations(pool_courses, r):
                     credits = sum(self.courses[c].credits for c in combo)
-                    if credits >= pool.min_credits:
-                        valid_combos.append(list(combo))
 
+                    if credits < pool.min_credits:
+                        continue
+
+                    if credits > pool.min_credits + 30:
+                        continue  # soft upper bound
+
+                    valid_combos.append(list(combo))
+                    
             all_pool_selections.append(valid_combos)
 
         # Cartesian product across pools
