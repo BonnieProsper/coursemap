@@ -1,14 +1,16 @@
 import json
 from pathlib import Path
+from typing import Dict
+
 from coursemap.domain.course import Course, Offering
 
 
-def load_courses_from_json(path: str):
-    data = json.loads(Path(path).read_text())
+def load_courses_from_json(path: str) -> Dict[str, Course]:
+    raw = json.loads(Path(path).read_text())
 
     courses = {}
 
-    for item in data:
+    for item in raw:
         offerings = [
             Offering(
                 semester=o["semester"],
