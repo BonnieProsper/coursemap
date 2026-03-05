@@ -27,7 +27,7 @@ def main():
 
     args = parser.parse_args()
 
-    courses = load_courses("data/dataset.json")
+    courses = load_courses()
     requirements = build_bsc_requirements()
 
     service = PlannerService(courses, requirements)

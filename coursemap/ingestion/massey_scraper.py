@@ -2,7 +2,7 @@ import time
 import requests
 from pathlib import Path
 
-from .massey_catalog_crawler import discover_course_links
+from .massey_course_discovery import discover_course_links
 from .course_parser import parse_course
 
 
@@ -19,7 +19,7 @@ def fetch_page(url):
     if cache_file.exists():
         return cache_file.read_text(encoding="utf-8")
 
-    r = requests.get(url, timeout=20)
+    r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
     r.raise_for_status()
 
     html = r.text
