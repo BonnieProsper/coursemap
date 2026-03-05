@@ -4,7 +4,7 @@ import json
 from coursemap.domain.seed_data import (
     build_course_catalog,
     build_bsc_requirements,
-)
+) # TODO: remove when nolonger needed
 from coursemap.optimisation.scorer import PlanScorer
 from coursemap.services.planner_service import PlannerService
 from coursemap.validation.engine import DegreeValidator
@@ -15,6 +15,8 @@ from coursemap.validation.rules import (
     MajorCompletionRule,
     TotalCreditRule,
 )
+from coursemap.ingestion.dataset_loader import load_courses
+
 
 
 def main():
@@ -25,7 +27,7 @@ def main():
 
     args = parser.parse_args()
 
-    courses = build_course_catalog()
+    courses = load_courses("data/dataset.json")
     requirements = build_bsc_requirements()
 
     service = PlannerService(courses, requirements)
