@@ -1,40 +1,64 @@
+import time
 import requests
 from pathlib import Path
-import time
 
-from .course_ids import COURSE_IDS
-
-BASE_URL = "https://www.massey.ac.nz/study/courses/"
-
-RAW_DIR = Path("raw_html")
-RAW_DIR.mkdir(exist_ok=True)
+from .massey_catalog_crawler import discover_course_links
+from .course_parser import parse_course
 
 
-def download_course_page(course_id: str):
-    url = f"{BASE_URL}{course_id}/"
-
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-
-        path = RAW_DIR / f"{course_id}.html"
-
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(r.text)
-
-        print(f"Downloaded {course_id}")
-
-        time.sleep(0.5)  # be polite to server
-
-    except Exception as e:
-        print(f"Failed {course_id}: {e}")
+CACHE_DIR = Path("datasets/raw_pages")
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def download_all():
+def fetch_page(url):
 
-    for cid in COURSE_IDS:
-        download_course_page(cid)
+    code = url.split("/")[-2]
+
+    cache_file = CACHE_DIR / f"{code}.html"
+
+    if cache_file.exists():
+        return cache_file.read_text(encoding="utf-8")
+
+    r = requests.get(url, timeout=20)
+    r.raise_for_status()
+
+    html = r.text
+
+    cache_file.write_text(html, encoding="utf-8")
+
+    time.sleep(0.4)
+
+    return html
+
+
+def scrape_all_courses():
+
+    links = discover_course_links()
+
+    courses = []
+
+    print(f"Found {len(links)} course links\n")
+
+    for url in links:
+
+        try:
+
+            html = fetch_page(url)
+
+            parsed = parse_course(html)
+
+            parsed["url"] = url
+
+            courses.append(parsed)
+
+            print("Scraped", parsed["code"])
+
+        except Exception as e:
+
+            print("Failed:", url, e)
+
+    return courses
 
 
 if __name__ == "__main__":
-    download_all()
+    scrape_all_courses()
