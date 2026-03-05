@@ -1,26 +1,34 @@
 import json
+from pathlib import Path
+
 from coursemap.domain.course import Course, Offering
 
 
-def load_courses(path):
+DATA_FILE = Path("datasets/courses.json")
 
-    with open(path) as f:
-        data = json.load(f)
+
+def load_courses():
+
+    data = json.loads(DATA_FILE.read_text())
 
     courses = {}
 
     for c in data:
 
         offerings = [
-            Offering(semester=s, campus="default", mode="internal")
-            for s in c["offerings"]
+            Offering(
+                semester=s,
+                campus="default",
+                mode="internal"
+            )
+            for s in c.get("offerings", [])
         ]
 
         course = Course(
             code=c["code"],
-            title=c["title"],
-            credits=c["credits"],
-            level=c["level"],
+            title=c.get("title"),
+            credits=c.get("credits"),
+            level=c.get("level"),
             offerings=offerings
         )
 

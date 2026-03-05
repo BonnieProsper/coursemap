@@ -1,32 +1,23 @@
 import json
 from pathlib import Path
 
-from .course_parser import parse_course
+from .massey_scraper import scrape_all_courses
 
 
-RAW_DIR = Path("raw_html")
-DATA_DIR = Path("data")
+DATA_DIR = Path("datasets")
 DATA_DIR.mkdir(exist_ok=True)
 
 
 def build_dataset():
 
-    dataset = []
+    courses = scrape_all_courses()
 
-    for file in RAW_DIR.glob("*.html"):
+    file = DATA_DIR / "courses.json"
 
-        html = file.read_text(encoding="utf-8")
+    file.write_text(json.dumps(courses, indent=2), encoding="utf-8")
 
-        parsed = parse_course(html)
+    print("\nSaved", len(courses), "courses to", file)
 
-        course_code = file.stem
 
-        dataset.append({
-            "code": course_code,
-            **parsed
-        })
-
-    with open(DATA_DIR / "dataset.json", "w") as f:
-        json.dump(dataset, f, indent=2)
-
-    print("Dataset built.")
+if __name__ == "__main__":
+    build_dataset()
