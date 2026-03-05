@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from .parsers import parse_course
+from .course_parser import parse_course
 
 
 def build_dataset():

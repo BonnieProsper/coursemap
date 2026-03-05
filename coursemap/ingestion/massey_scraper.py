@@ -2,6 +2,8 @@ import requests
 from pathlib import Path
 import time
 
+from .course_ids import COURSE_IDS
+
 BASE_URL = "https://www.massey.ac.nz/study/courses/"
 
 RAW_DIR = Path("raw_html")
@@ -26,3 +28,13 @@ def download_course_page(course_id: str):
 
     except Exception as e:
         print(f"Failed {course_id}: {e}")
+
+
+def download_all():
+
+    for cid in COURSE_IDS:
+        download_course_page(cid)
+
+
+if __name__ == "__main__":
+    download_all()
