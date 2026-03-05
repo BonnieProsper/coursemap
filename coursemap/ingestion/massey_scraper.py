@@ -2,7 +2,7 @@ import time
 import requests
 from pathlib import Path
 
-from .massey_course_discovery import discover_course_links
+from .massey_course_index import discover_courses
 from .course_parser import parse_course
 
 
@@ -33,7 +33,7 @@ def fetch_page(url):
 
 def scrape_all_courses():
 
-    links = discover_course_links()
+    links = discover_courses()
 
     courses = []
 
