@@ -59,6 +59,13 @@ def build_course_catalog() -> Dict[str, Course]:
     }
 
 
+def build_seed_courses() -> Dict[str, Course]:
+    """
+    Backward-compatible alias used by older tests/modules.
+    """
+    return build_course_catalog()
+
+
 # --------------------------------------------------
 # DEGREE REQUIREMENTS
 # --------------------------------------------------

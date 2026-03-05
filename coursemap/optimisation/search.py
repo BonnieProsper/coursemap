@@ -39,12 +39,14 @@ class ExhaustivePlanSearch:
         self.total_attempts = 0
         self.generation_failures = 0
         self.validation_failures = 0
+        self.prerequisite_pruned = 0
         self.failure_breakdown = defaultdict(int)
 
     def search(self) -> DegreePlan:
         self.total_attempts = 0
         self.generation_failures = 0
         self.validation_failures = 0
+        self.prerequisite_pruned = 0
         self.failure_breakdown.clear()
 
         best_plan: Optional[DegreePlan] = None
@@ -61,6 +63,10 @@ class ExhaustivePlanSearch:
                 selected_courses = self._build_course_subset(elective_set, major)
 
                 if not self._quick_credit_check(selected_courses):
+                    continue
+
+                if not self._is_prerequisite_schedulable(selected_courses):
+                    self.prerequisite_pruned += 1
                     continue
 
                 generator = PlanGenerator(
@@ -172,9 +178,16 @@ class ExhaustivePlanSearch:
     def _print_diagnostics(self):
         print("\n===== SEARCH DIAGNOSTICS =====")
         print(f"Total Attempts: {self.total_attempts}")
+        print(f"Prerequisite-Pruned Branches: {self.prerequisite_pruned}")
         print(f"Generation Failures: {self.generation_failures}")
         print(f"Validation Failures: {self.validation_failures}")
-        print(f"Valid Plans Found: {self.total_attempts - self.generation_failures - self.validation_failures}")
+        valid = (
+            self.total_attempts
+            - self.prerequisite_pruned
+            - self.generation_failures
+            - self.validation_failures
+        )
+        print(f"Valid Plans Found: {valid}")
 
         if self.failure_breakdown:
             print("\nTop Validation Failures:")
@@ -185,7 +198,7 @@ class ExhaustivePlanSearch:
             ):
                 print(f"  {count}x - {error}")
 
-        success = self.total_attempts - self.generation_failures - self.validation_failures
+        success = valid
         rate = success / self.total_attempts if self.total_attempts else 0
         print(f"Success Rate: {rate:.2%}")
 
@@ -193,3 +206,32 @@ class ExhaustivePlanSearch:
     def _quick_credit_check(self, selected_courses: Dict[str, Course]) -> bool:
         total = sum(c.credits for c in selected_courses.values())
         return total == self.requirements.total_credits
+
+    def _is_prerequisite_schedulable(
+        self,
+        selected_courses: Dict[str, Course],
+    ) -> bool:
+        """
+        Feasibility check independent of semester offerings:
+        iteratively "complete" courses only when prerequisites are satisfied.
+        If progress stalls before all courses are completed, prune branch early.
+        """
+        remaining = set(selected_courses.keys())
+        completed = set()
+
+        while remaining:
+            unlocked = []
+
+            for code in sorted(remaining):
+                prereq = selected_courses[code].prerequisites
+                if prereq is None or prereq.is_satisfied(completed):
+                    unlocked.append(code)
+
+            if not unlocked:
+                return False
+
+            for code in unlocked:
+                remaining.remove(code)
+                completed.add(code)
+
+        return True
