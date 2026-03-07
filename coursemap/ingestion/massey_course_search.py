@@ -1,14 +1,13 @@
 import requests
 import time
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
 
 BASE = "https://www.massey.ac.nz"
 
-SEARCH_URL = BASE + "/search/"
+API = BASE + "/search/api/"
 
 PARAMS = {
-    "size": "n_100_n",
+    "size": 100,
+    "from": 0,
     "filters[0][field]": "__search_type",
     "filters[0][values][0]": "course-qual",
     "filters[0][type]": "any",
@@ -18,88 +17,59 @@ PARAMS = {
 }
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": "Mozilla/5.0",
 }
 
 
-def fetch_page(page: int):
+def fetch_page(offset: int):
 
     params = PARAMS.copy()
+    params["from"] = offset
 
-    # pagination
-    params["from"] = str(page * 100)
-
-    r = requests.get(
-        SEARCH_URL,
-        headers=HEADERS,
-        params=params,
-        timeout=30
-    )
-
+    r = requests.get(API, headers=HEADERS, params=params, timeout=30)
     r.raise_for_status()
 
-    return r.text
-
-import re
-
-def parse_courses(html):
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    courses = []
-
-    pattern = re.compile(r"\b\d{6}\b")
-
-    for element in soup.find_all(string=pattern):
-
-        match = pattern.search(element)
-
-        if match:
-
-            code = match.group()
-
-            title = element.strip()
-
-            url = f"{BASE}/course/{code}"
-
-            courses.append({
-                "title": title,
-                "url": url,
-                "code": code
-            })
-
-    return courses
+    return r.json()
 
 
 def discover_courses():
 
-    all_courses = []
+    courses = []
+    offset = 0
 
-    for page in range(30):
+    while True:
 
-        print("Scanning page", page)
+        print("Fetching offset", offset)
 
-        html = fetch_page(page)
+        data = fetch_page(offset)
 
-        courses = parse_courses(html)
+        results = data["results"]
 
-        print("Found", len(courses))
+        if not results:
+            break
 
-        all_courses.extend(courses)
+        for r in results:
 
-        time.sleep(0.5)
+            if r["sub_type"] != "course":
+                continue
 
-    # remove duplicates
-    unique = {c["url"]: c for c in all_courses}
+            courses.append({
+                "title": r["title"],
+                "url": BASE + r["url"],
+                "code": r["course_code"]
+            })
 
-    return list(unique.values())
+        offset += 100
+        time.sleep(0.3)
+
+    return courses
 
 
 if __name__ == "__main__":
 
     courses = discover_courses()
 
-    print("\nDiscovered", len(courses), "course pages\n")
+    print("\nDiscovered", len(courses), "courses\n")
 
     for c in courses[:10]:
         print(c)
