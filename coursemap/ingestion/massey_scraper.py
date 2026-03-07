@@ -2,7 +2,7 @@ import time
 import requests
 from pathlib import Path
 
-from .massey_course_index import discover_courses
+from .massey_api_scraper import discover_courses
 from .course_parser import parse_course
 
 
@@ -10,16 +10,21 @@ CACHE_DIR = Path("datasets/raw_pages")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+
 def fetch_page(url):
 
-    code = url.split("/")[-2]
+    code = url.split("/")[-2].split("-")[0]
 
     cache_file = CACHE_DIR / f"{code}.html"
 
     if cache_file.exists():
         return cache_file.read_text(encoding="utf-8")
 
-    r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+    r = requests.get(url, headers=HEADERS, timeout=20)
     r.raise_for_status()
 
     html = r.text
@@ -37,7 +42,7 @@ def scrape_all_courses():
 
     courses = []
 
-    print(f"Found {len(links)} course links\n")
+    print(f"\nDiscovered {len(links)} course pages\n")
 
     for url in links:
 
@@ -61,4 +66,5 @@ def scrape_all_courses():
 
 
 if __name__ == "__main__":
+
     scrape_all_courses()
