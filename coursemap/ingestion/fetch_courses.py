@@ -1,18 +1,18 @@
 import time
+import json
 from coursemap.ingestion.swiftype_client import search
 
 BASE = "https://www.massey.ac.nz"
 
 
-def discover_qualifications():
+def discover_courses():
 
     page = 1
-    quals = []
-    specs = []
+    courses = []
 
     while True:
 
-        print(f"Fetching qualification page {page}")
+        print(f"Fetching course page {page}")
 
         payload = {
             "per_page": 100,
@@ -21,7 +21,7 @@ def discover_qualifications():
             "sort_field": {"course-qual": "title"},
             "filters": {
                 "course-qual": {
-                    "sub_type": {"values": ["qual", "spec"]}
+                    "sub_type": {"values": ["course"]}
                 }
             },
             "fetch_fields": {
@@ -29,11 +29,12 @@ def discover_qualifications():
                     "title",
                     "intro",
                     "url",
-                    "sub_type",
-                    "qual_code",
-                    "qual_length",
-                    "max_duration",
-                    "nzqf_level"
+                    "course_code",
+                    "course_credit_float",
+                    "subject_areas",
+                    "course_level",
+                    "nzqf_level",
+                    "offerings_json"
                 ]
             },
             "q": ""
@@ -53,23 +54,30 @@ def discover_qualifications():
                     return v[0] if v else None
                 return v
 
-            item = {
+            def parse_offerings(v):
+                if not v:
+                    return []
+                if isinstance(v, str):
+                    return json.loads(v)
+                return v
+
+            course_code = safe(r.get("course_code"))
+
+            course = {
                 "title": safe(r.get("title")),
                 "url": BASE + safe(r.get("url")),
-                "qual_code": safe(r.get("qual_code")),
-                "type": safe(r.get("sub_type")),
+                "course_code": course_code,
+                "credits": r.get("course_credit_float"),
                 "level": safe(r.get("nzqf_level")),
-                "length": safe(r.get("qual_length")),
-                "max_duration": safe(r.get("max_duration")),
-                "intro": safe(r.get("intro"))
+                "course_level": safe(r.get("course_level")),
+                "subjects": r.get("subject_areas"),
+                "intro": safe(r.get("intro")),
+                "offerings": parse_offerings(r.get("offerings_json"))
             }
 
-            if item["type"] == "qual":
-                quals.append(item)
-            else:
-                specs.append(item)
+            courses.append(course)
 
         page += 1
         time.sleep(0.4)
 
-    return quals, specs
+    return courses
