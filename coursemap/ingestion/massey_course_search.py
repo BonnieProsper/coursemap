@@ -96,8 +96,8 @@ def discover_courses():
                 "title": safe(r.get("title")),
                 "url": safe(r.get("url")),
                 "course_code": safe(r.get("course_code")),
-                "credits": safe(r.get("credits")),
-                "level": safe(r.get("nzqf_level")),
+                "credits": r.get("course_credit_float"),
+                "level": r.get("nzqf_level"),
                 "intro": safe(r.get("intro")),
                 "offerings": r.get("offerings_json", [])
             }
