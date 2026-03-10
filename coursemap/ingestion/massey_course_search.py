@@ -1,5 +1,7 @@
 import requests
 import time
+import json
+
 
 API_URL = "https://search-api.swiftype.com/api/v1/public/engines/search.json"
 
@@ -90,6 +92,13 @@ def discover_courses():
                 if isinstance(v, list):
                     return v[0] if v else None
                 return v
+            
+            def parse_offerings(v):
+                if not v:
+                    return []
+                if isinstance(v, str):
+                    return json.loads(v)
+                return v
 
 
             course = {
@@ -99,7 +108,7 @@ def discover_courses():
                 "credits": r.get("course_credit_float"),
                 "level": r.get("nzqf_level"),
                 "intro": safe(r.get("intro")),
-                "offerings": r.get("offerings_json", [])
+                "offerings": parse_offerings(r.get("offerings_json", []))
             }
 
             courses.append(course)
