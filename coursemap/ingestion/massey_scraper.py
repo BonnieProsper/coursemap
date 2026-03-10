@@ -1,70 +1,61 @@
-import time
 import requests
-from pathlib import Path
+from bs4 import BeautifulSoup
 
-from .massey_api_scraper import discover_courses
-from .course_parser import parse_course
-
-
-CACHE_DIR = Path("datasets/raw_pages")
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+def scrape_course(url):
 
-
-def fetch_page(url):
-
-    code = url.split("/")[-2].split("-")[0]
-
-    cache_file = CACHE_DIR / f"{code}.html"
-
-    if cache_file.exists():
-        return cache_file.read_text(encoding="utf-8")
-
-    r = requests.get(url, headers=HEADERS, timeout=20)
+    r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
-    html = r.text
+    soup = BeautifulSoup(r.text, "html.parser")
 
-    cache_file.write_text(html, encoding="utf-8")
+    title = None
+    code = None
 
-    time.sleep(0.4)
+    h1 = soup.find("h1")
 
-    return html
+    if h1:
+        title = h1.get_text(strip=True)
 
+    text = soup.get_text(" ", strip=True)
 
-def scrape_all_courses():
+    credits = None
+    level = None
+    prerequisites = None
+    restrictions = None
 
-    links = discover_courses()
+    for line in text.split("."):
 
-    courses = []
+        l = line.lower()
 
-    print(f"\nDiscovered {len(links)} course pages\n")
+        if "credit" in l and credits is None:
+            credits = line.strip()
 
-    for url in links:
+        if "level" in l and level is None:
+            level = line.strip()
 
-        try:
+        if "prerequisite" in l and prerequisites is None:
+            prerequisites = line.strip()
 
-            html = fetch_page(url)
+        if "restriction" in l and restrictions is None:
+            restrictions = line.strip()
 
-            parsed = parse_course(html)
+    semesters = []
 
-            parsed["url"] = url
+    for li in soup.find_all("li"):
 
-            courses.append(parsed)
+        t = li.get_text(strip=True)
 
-            print("Scraped", parsed["code"])
+        if "semester" in t.lower():
+            semesters.append(t)
 
-        except Exception as e:
-
-            print("Failed:", url, e)
-
-    return courses
-
-
-if __name__ == "__main__":
-
-    scrape_all_courses()
+    return {
+        "title": title,
+        "credits": credits,
+        "level": level,
+        "prerequisites": prerequisites,
+        "restrictions": restrictions,
+        "semesters": semesters
+    }
