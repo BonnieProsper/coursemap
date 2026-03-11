@@ -15,6 +15,7 @@ def search(payload):
     payload["engine_key"] = ENGINE_KEY
 
     r = requests.post(API_URL, json=payload, headers=HEADERS, timeout=30)
+
     r.raise_for_status()
 
     return r.json()
