@@ -3,21 +3,29 @@ import requests
 from bs4 import BeautifulSoup
 
 
+COURSE_CODE_RE = r"\b\d{6}\b"
+
+
 def scrape_prerequisites(url):
 
-    r = requests.get(url)
-    soup = BeautifulSoup(r.text, "html.parser")
+    try:
 
-    text = soup.get_text(" ", strip=True)
+        r = requests.get(url, timeout=15)
 
-    prereq_line = None
+        soup = BeautifulSoup(r.text, "html.parser")
 
-    for sentence in text.split("."):
-        if "Prerequisite" in sentence:
-            prereq_line = sentence
-            break
+        text = soup.get_text(" ", strip=True)
 
-    if not prereq_line:
+        matches = []
+
+        for sentence in text.split("."):
+
+            if "Prerequisite" in sentence:
+
+                matches += re.findall(COURSE_CODE_RE, sentence)
+
+        return sorted(set(matches))
+
+    except Exception:
+
         return []
-
-    return re.findall(r"\b\d{6}\b", prereq_line)
