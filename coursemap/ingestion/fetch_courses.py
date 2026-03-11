@@ -1,8 +1,30 @@
 import time
 import json
+
 from coursemap.ingestion.swiftype_client import search
 
 BASE = "https://www.massey.ac.nz"
+
+
+def safe(v):
+
+    if isinstance(v, list):
+        return v[0] if v else None
+    return v
+
+
+def parse_offerings(v):
+
+    if not v:
+        return []
+
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except Exception:
+            return []
+
+    return v
 
 
 def discover_courses():
@@ -17,8 +39,6 @@ def discover_courses():
         payload = {
             "per_page": 100,
             "page": page,
-            "sort_direction": {"course-qual": "asc"},
-            "sort_field": {"course-qual": "title"},
             "filters": {
                 "course-qual": {
                     "sub_type": {"values": ["course"]}
@@ -34,6 +54,10 @@ def discover_courses():
                     "subject_areas",
                     "course_level",
                     "nzqf_level",
+                    "locations",
+                    "delivery_mode",
+                    "year",
+                    "semester",
                     "offerings_json"
                 ]
             },
@@ -49,35 +73,39 @@ def discover_courses():
 
         for r in results:
 
-            def safe(v):
-                if isinstance(v, list):
-                    return v[0] if v else None
-                return v
-
-            def parse_offerings(v):
-                if not v:
-                    return []
-                if isinstance(v, str):
-                    return json.loads(v)
-                return v
-
-            course_code = safe(r.get("course_code"))
+            url = safe(r.get("url"))
 
             course = {
+
+                "course_code": safe(r.get("course_code")),
+
                 "title": safe(r.get("title")),
-                "url": BASE + safe(r.get("url")),
-                "course_code": course_code,
+
+                "url": BASE + url if url else None,
+
                 "credits": r.get("course_credit_float"),
+
                 "level": safe(r.get("nzqf_level")),
+
                 "course_level": safe(r.get("course_level")),
+
                 "subjects": r.get("subject_areas"),
+
                 "intro": safe(r.get("intro")),
-                "offerings": parse_offerings(r.get("offerings_json"))
+
+                "offerings": parse_offerings(r.get("offerings_json")),
+
+                "prerequisites": [],
+
+                "corequisites": [],
+
+                "restrictions": []
             }
 
             courses.append(course)
 
         page += 1
+
         time.sleep(0.4)
 
     return courses

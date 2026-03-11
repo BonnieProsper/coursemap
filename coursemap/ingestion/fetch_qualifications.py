@@ -1,12 +1,21 @@
 import time
+
 from coursemap.ingestion.swiftype_client import search
 
 BASE = "https://www.massey.ac.nz"
 
 
+def safe(v):
+
+    if isinstance(v, list):
+        return v[0] if v else None
+    return v
+
+
 def discover_qualifications():
 
     page = 1
+
     quals = []
     specs = []
 
@@ -17,8 +26,6 @@ def discover_qualifications():
         payload = {
             "per_page": 100,
             "page": page,
-            "sort_direction": {"course-qual": "asc"},
-            "sort_field": {"course-qual": "title"},
             "filters": {
                 "course-qual": {
                     "sub_type": {"values": ["qual", "spec"]}
@@ -48,19 +55,24 @@ def discover_qualifications():
 
         for r in results:
 
-            def safe(v):
-                if isinstance(v, list):
-                    return v[0] if v else None
-                return v
+            url = safe(r.get("url"))
 
             item = {
+
                 "title": safe(r.get("title")),
-                "url": BASE + safe(r.get("url")),
+
+                "url": BASE + url if url else None,
+
                 "qual_code": safe(r.get("qual_code")),
+
                 "type": safe(r.get("sub_type")),
+
                 "level": safe(r.get("nzqf_level")),
+
                 "length": safe(r.get("qual_length")),
+
                 "max_duration": safe(r.get("max_duration")),
+
                 "intro": safe(r.get("intro"))
             }
 
@@ -70,6 +82,7 @@ def discover_qualifications():
                 specs.append(item)
 
         page += 1
+
         time.sleep(0.4)
 
     return quals, specs
