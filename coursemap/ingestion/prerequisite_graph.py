@@ -5,11 +5,11 @@ class CourseGraph:
 
     def __init__(self):
 
-        self.graph = defaultdict(list)
+        self.graph = defaultdict(set)
 
     def add_prereq(self, course, prereq):
 
-        self.graph[prereq].append(course)
+        self.graph[prereq].add(course)
 
     def build(self, courses):
 
@@ -23,4 +23,4 @@ class CourseGraph:
 
     def successors(self, course):
 
-        return self.graph.get(course, [])
+        return list(self.graph.get(course, []))
