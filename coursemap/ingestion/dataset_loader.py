@@ -1,8 +1,13 @@
 import json
 from pathlib import Path
+from typing import List
 
+from coursemap.domain.prerequisite import (
+    CourseRequirement,
+    AndExpression,
+    PrerequisiteExpression,
+)
 from coursemap.domain.course import Course, Offering
-from coursemap.domain.prerequisite import CourseRequirement, AndExpression
 
 
 DATASET_PATH = Path("datasets/courses.json")
@@ -40,7 +45,9 @@ def _parse_prereqs(prereqs):
     if not prereqs:
         return None
 
-    exprs = [CourseRequirement(code) for code in prereqs]
+    exprs: List[PrerequisiteExpression] = [
+        CourseRequirement(code) for code in prereqs
+    ]
 
     if len(exprs) == 1:
         return exprs[0]
