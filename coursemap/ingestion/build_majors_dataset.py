@@ -1,34 +1,15 @@
 import json
-from pathlib import Path
-
-from coursemap.ingestion.major_requirements_scraper import scrape_major
-from coursemap.ingestion.massey_majors import MAJOR_PAGES
-
-DATASET = Path("datasets/majors.json")
+from coursemap.ingestion.scrape_majors import scrape_majors
 
 
-def build_majors():
+def main():
+    majors = scrape_majors()
 
-    majors = {}
-
-    for name, url in MAJOR_PAGES.items():
-
-        print(f"Scraping {name}")
-
-        major = scrape_major(url, name)
-
-        majors[name] = {
-            "core_courses": major["core_courses"],
-            "elective_pools": major["elective_pools"],
-        }
-
-    DATASET.parent.mkdir(exist_ok=True)
-
-    with open(DATASET, "w") as f:
+    with open("majors.json", "w") as f:
         json.dump(majors, f, indent=2)
 
-    print("Majors dataset written")
+    print("Saved majors.json")
 
 
 if __name__ == "__main__":
-    build_majors()
+    main()

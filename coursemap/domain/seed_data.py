@@ -69,44 +69,14 @@ def build_seed_courses() -> Dict[str, Course]:
 # --------------------------------------------------
 # DEGREE REQUIREMENTS
 # --------------------------------------------------
-def build_bsc_requirements() -> DegreeRequirements:
+def build_bsc_requirements():
 
-    level_requirements = {
-        200: LevelCreditRequirement(level=200, min_credits=60),
-        300: LevelCreditRequirement(level=300, min_credits=60),
-    }
-
-    statistics_major = Major(
-        name="Statistics",
-        required_courses={
-            "STAT201",
-            "STAT202",
-            "STAT301",
-            "STAT302",
-        },
-        total_credits=60,
-        min_200_level=30,
-        min_300_level=30,
-    )
-
-    elective_pool = ElectivePool(
-        name="General Science Electives",
-        course_codes={
-            "MATH101", "COMP101", "PHYS101",
-            "COMP201", "PHYS201", "MATH201",
-            "COMP301", "PHYS301", "MATH301",
-        },
-        min_credits=105,  # 7 courses × 15 = 105
-    )
+    from coursemap.domain.degree_requirements import DegreeRequirements
 
     return DegreeRequirements(
-        total_credits=180,
-        max_100_level=90,
-        min_300_level=60,
-        level_requirements=level_requirements,
-        core_courses={"STAT101"},
-        min_schedule_credits=None,
-        required_majors=1,
-        available_majors=[statistics_major],
-        elective_pools=[elective_pool],
+        total_credits=360,
+        core_courses=[],
+        elective_pools=[],
+        majors=[],
+        level_credit_requirements=[],
     )
