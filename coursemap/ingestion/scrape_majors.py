@@ -75,7 +75,13 @@ def scrape_majors():
     data = {}
 
     for name, url in majors.items():
+
         print("Scraping", name)
-        data[name] = parse_major_page(url)
+
+        try:
+            data[name] = parse_major_page(url)
+        except Exception as e:
+            print("Failed to scrape", name, e)
+            data[name] = {"required": [], "elective_pools": []}
 
     return data
