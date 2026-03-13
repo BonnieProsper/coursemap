@@ -85,4 +85,7 @@ def discover_qualifications():
 
         time.sleep(0.4)
 
+    for r in results[:10]:
+        print(r["title"], r["url"])
+
     return quals, specs
