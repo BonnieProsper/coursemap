@@ -1,12 +1,10 @@
 import time
-
 from coursemap.ingestion.swiftype_client import search
 
 BASE = "https://www.massey.ac.nz"
 
 
 def safe(v):
-
     if isinstance(v, list):
         return v[0] if v else None
     return v
@@ -15,7 +13,6 @@ def safe(v):
 def discover_qualifications():
 
     page = 1
-
     quals = []
     specs = []
 
@@ -40,10 +37,10 @@ def discover_qualifications():
                     "qual_code",
                     "qual_length",
                     "max_duration",
-                    "nzqf_level"
+                    "nzqf_level",
                 ]
             },
-            "q": ""
+            "q": "",
         }
 
         data = search(payload)
@@ -58,36 +55,34 @@ def discover_qualifications():
             url = safe(r.get("url"))
 
             item = {
-
                 "title": safe(r.get("title")),
-
                 "url": BASE + url if url else None,
-
                 "qual_code": safe(r.get("qual_code")),
-
                 "type": safe(r.get("sub_type")),
-
                 "level": safe(r.get("nzqf_level")),
-
                 "length": safe(r.get("qual_length")),
-
                 "max_duration": safe(r.get("max_duration")),
-
-                "intro": safe(r.get("intro"))
+                "intro": safe(r.get("intro")),
             }
 
             if item["type"] == "qual":
                 quals.append(item)
-            else:
+            elif item["type"] == "spec":
                 specs.append(item)
 
         page += 1
-
         time.sleep(0.4)
 
-        for r in results[:10]:
-            print(r["title"], r["url"])
+    print(f"Discovered {len(quals)} qualifications")
+    print(f"Discovered {len(specs)} specialisations")
 
     return quals, specs
 
-discover_qualifications() 
+
+def discover_specialisations():
+    _, specs = discover_qualifications()
+    return specs
+
+
+if __name__ == "__main__":
+    discover_qualifications()
