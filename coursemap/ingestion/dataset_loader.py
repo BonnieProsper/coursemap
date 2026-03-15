@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 from coursemap.domain.prerequisite import (
     CourseRequirement,
@@ -8,9 +8,12 @@ from coursemap.domain.prerequisite import (
     PrerequisiteExpression,
 )
 from coursemap.domain.course import Course, Offering
+from coursemap.domain.requirement_serialization import requirement_from_dict
 
 
 DATASET_PATH = Path("datasets/courses.json")
+MAJORS_DATASET_PATH = Path("datasets/majors.json")
+REQUIREMENTS_DATASET_PATH = Path("datasets/requirements.json")
 
 
 def _parse_offerings(raw):
@@ -97,3 +100,30 @@ def load_courses():
     print(f"Loaded {len(courses)} courses from dataset")
 
     return courses
+
+
+def load_majors() -> List[Dict[str, Any]]:
+    """
+    Load majors.json (requirement node tree format).
+    Returns list of {"name": str, "url": str, "requirement": dict}.
+    Use requirement_from_dict(item["requirement"]) to get a RequirementNode.
+    """
+    if not MAJORS_DATASET_PATH.exists():
+        raise FileNotFoundError(
+            "datasets/majors.json not found. Run ingestion/build_majors_dataset.py first."
+        )
+    with open(MAJORS_DATASET_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_requirement_tree(data: Dict[str, Any]):
+    """Parse a requirement tree dict (e.g. from JSON) into a RequirementNode."""
+    return requirement_from_dict(data)
+
+
+def load_requirement_tree_from_file(path: Path = REQUIREMENTS_DATASET_PATH):
+    """Load a requirement tree from a JSON file (e.g. requirements.json)."""
+    if not path.exists():
+        raise FileNotFoundError(f"Requirement tree file not found: {path}")
+    with open(path, encoding="utf-8") as f:
+        return requirement_from_dict(json.load(f))

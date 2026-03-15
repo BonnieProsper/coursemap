@@ -77,20 +77,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-# replace seed data:
-
-from coursemap.ingestion.major_loader import load_majors
-from coursemap.domain.degree_requirements import DegreeRequirements
-
-majors = load_majors()
-
-requirements = DegreeRequirements(
-    total_credits=360,
-    core_courses=[],
-    elective_pools=[],
-    majors=majors,
-    level_credit_requirements=[]
-)

@@ -1,3 +1,7 @@
+"""
+Build majors.json: list of { "name", "url", "requirement" } where requirement
+is a requirement node tree (dict) matching domain/requirement_serialization format.
+"""
 import json
 import requests
 
@@ -5,33 +9,26 @@ from coursemap.ingestion.fetch_qualifications import discover_specialisations
 from coursemap.ingestion.major_parser import parse_major_page
 
 
-def build_majors_dataset():
-
-    majors = {}
-
+def build_majors_dataset() -> None:
     specs = discover_specialisations()
+    majors = []
 
     print(f"Found {len(specs)} specialisations")
 
     for i, spec in enumerate(specs):
-
         title = spec["title"]
         url = spec["url"]
 
         print(f"Scraping {i+1}/{len(specs)}: {title}")
 
         try:
-
             html = requests.get(url, timeout=30).text
-
-            major_data = parse_major_page(html)
-
-            majors[title] = {
+            requirement_tree = parse_major_page(html)
+            majors.append({
+                "name": title,
                 "url": url,
-                "required": major_data["required"],
-                "elective_pools": major_data["elective_pools"],
-            }
-
+                "requirement": requirement_tree,
+            })
         except Exception as e:
             print(f"Failed: {title} ({e})")
 
