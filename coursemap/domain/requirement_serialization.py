@@ -128,15 +128,5 @@ def requirement_from_dict(data: Dict[str, Any]) -> RequirementNode:
 
 def requirement_collect_course_codes(node: RequirementNode) -> Set[str]:
     """Recursively collect all course codes mentioned in a requirement tree."""
-    out: Set[str] = set()
-    if isinstance(node, CourseRequirement):
-        out.add(node.course_code)
-    elif isinstance(node, (AllOfRequirement, AnyOfRequirement)):
-        for c in node.children:
-            out |= requirement_collect_course_codes(c)
-    elif isinstance(node, (ChooseCreditsRequirement, ChooseNRequirement, MinLevelCreditsFromRequirement)):
-        out.update(node.course_codes)
-    elif isinstance(node, MajorRequirement):
-        out |= requirement_collect_course_codes(node.requirement)
-    # MinLevelCreditsRequirement, MaxLevelCreditsRequirement, TotalCreditsRequirement: no course codes
-    return out
+    from .requirement_utils import collect_course_codes
+    return collect_course_codes(node)

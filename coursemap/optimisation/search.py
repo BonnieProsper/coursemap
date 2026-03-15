@@ -4,46 +4,17 @@ from collections import defaultdict
 
 from coursemap.domain.course import Course
 from coursemap.domain.plan import DegreePlan
-from coursemap.domain.requirement_nodes import (
-    AllOfRequirement,
-    ChooseCreditsRequirement,
-    CourseRequirement,
-    RequirementNode,
-    TotalCreditsRequirement,
-)
-from coursemap.domain.requirement_serialization import (
-    requirement_collect_course_codes,
-    requirement_from_dict,
+from coursemap.domain.requirement_nodes import ChooseCreditsRequirement, RequirementNode
+from coursemap.domain.requirement_serialization import requirement_from_dict
+from coursemap.domain.requirement_utils import (
+    collect_core_course_codes,
+    collect_course_codes,
+    collect_elective_nodes,
+    find_total_credits,
 )
 from coursemap.planner.generator import PlanGenerator
 from coursemap.validation.engine import DegreeValidator
 from coursemap.optimisation.scorer import PlanScorer
-
-
-def _extract_enumeration_from_degree_tree(
-    root: RequirementNode,
-) -> Tuple[int, Set[str], List[Tuple[int, Tuple[str, ...]]]]:
-    """
-    Extract total_credits, core_courses, and elective_pools from the root degree
-    requirement (expected ALL_OF with TOTAL_CREDITS, COURSE, CHOOSE_CREDITS children).
-    Used by solver for enumeration only; validation uses the tree directly.
-    """
-    total_credits = 0
-    core_courses: Set[str] = set()
-    elective_pools: List[Tuple[int, Tuple[str, ...]]] = []
-
-    if not isinstance(root, AllOfRequirement):
-        return total_credits, core_courses, elective_pools
-
-    for child in root.children:
-        if isinstance(child, TotalCreditsRequirement):
-            total_credits = child.required_credits
-        elif isinstance(child, CourseRequirement):
-            core_courses.add(child.course_code)
-        elif isinstance(child, ChooseCreditsRequirement):
-            elective_pools.append((child.credits, child.course_codes))
-
-    return total_credits, core_courses, elective_pools
 
 
 class ExhaustivePlanSearch:
@@ -79,15 +50,20 @@ class ExhaustivePlanSearch:
         self.prerequisite_pruned = 0
         self.failure_breakdown.clear()
 
-        total_credits, core_courses, elective_pools = _extract_enumeration_from_degree_tree(
-            self.degree_requirement
-        )
+        total_credits = find_total_credits(self.degree_requirement)
+        core_courses = collect_core_course_codes(self.degree_requirement)
+        elective_node_list = collect_elective_nodes(self.degree_requirement)
+        elective_pools: List[Tuple[int, Tuple[str, ...]]] = [
+            (n.credits, n.course_codes)
+            for n in elective_node_list
+            if isinstance(n, ChooseCreditsRequirement)
+        ]
         majors_with_codes: List[Dict] = []
         for m in self.majors:
             req = requirement_from_dict(m["requirement"])
             majors_with_codes.append({
                 "name": m["name"],
-                "course_codes": requirement_collect_course_codes(req),
+                "course_codes": collect_course_codes(req),
             })
 
         best_plan: Optional[DegreePlan] = None
