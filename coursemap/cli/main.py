@@ -8,13 +8,7 @@ from coursemap.domain.seed_data import (
 from coursemap.optimisation.scorer import PlanScorer
 from coursemap.services.planner_service import PlannerService
 from coursemap.validation.engine import DegreeValidator
-from coursemap.validation.rules import (
-    CoreCourseRule,
-    ElectivePoolRule,
-    LevelCreditRule,
-    MajorCompletionRule,
-    TotalCreditRule,
-)
+from coursemap.validation.tree_builder import build_requirement_tree
 from coursemap.ingestion.dataset_loader import load_courses
 
 
@@ -72,16 +66,8 @@ def main():
     scorer = PlanScorer()
     print(f"Plan Score: {scorer.score(plan):.2f}")
 
-    rules = [
-        TotalCreditRule(active_requirements),
-        LevelCreditRule(active_requirements),
-        CoreCourseRule(active_requirements.core_courses),
-        MajorCompletionRule(active_requirements),
-    ]
-    for pool in active_requirements.elective_pools:
-        rules.append(ElectivePoolRule(pool))
-
-    validator = DegreeValidator(rules)
+    degree_requirement = build_requirement_tree(active_requirements)
+    validator = DegreeValidator(degree_requirement)
     result = validator.validate(plan)
     if not result.passed:
         raise ValueError("Generated plan failed validation: " + "; ".join(result.errors))

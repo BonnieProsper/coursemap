@@ -7,14 +7,7 @@ from coursemap.domain.degree_requirements import DegreeRequirements
 from coursemap.domain.plan import DegreePlan
 from coursemap.planner.generator import PlanGenerator
 from coursemap.validation.engine import DegreeValidator
-from coursemap.validation.rules import (
-    TotalCreditRule,
-    LevelCreditRule,
-    CoreCourseRule,
-    ElectivePoolRule,
-    MajorCompletionRule,
-    AllowedCourseRule,
-)
+from coursemap.validation.tree_builder import build_requirement_tree
 from coursemap.optimisation.scorer import PlanScorer
 
 
@@ -157,18 +150,8 @@ class ExhaustivePlanSearch:
         return selected
 
     def _validate(self, plan: DegreePlan):
-        rules = [
-            TotalCreditRule(self.requirements),
-            LevelCreditRule(self.requirements),
-            CoreCourseRule(self.requirements.core_courses),
-            MajorCompletionRule(self.requirements),
-            AllowedCourseRule(self.requirements),
-        ]
-
-        for pool in self.requirements.elective_pools:
-            rules.append(ElectivePoolRule(pool))
-
-        validator = DegreeValidator(rules)
+        degree_requirement = build_requirement_tree(self.requirements)
+        validator = DegreeValidator(degree_requirement)
         return validator.validate(plan)
 
     def _score(self, plan: DegreePlan) -> float:

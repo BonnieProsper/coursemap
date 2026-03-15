@@ -13,12 +13,17 @@ def test_exhaustive_search_returns_valid_plan():
 
     requirements = DegreeRequirements(
         total_credits=105,
+        max_100_level=None,
+        min_300_level=None,
         level_requirements={
             100: LevelCreditRequirement(100, 60),
             200: LevelCreditRequirement(200, 30),
             300: LevelCreditRequirement(300, 15),
         },
         core_courses=set(courses.keys()),
+        min_schedule_credits=None,
+        required_majors=0,
+        available_majors=[],
         elective_pools=[],
     )
 

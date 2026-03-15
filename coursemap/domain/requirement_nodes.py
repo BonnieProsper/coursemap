@@ -96,13 +96,48 @@ class MinLevelCreditsRequirement(RequirementNode):
 
 
 @dataclass(frozen=True)
+class MinLevelCreditsFromRequirement(RequirementNode):
+    """Minimum credits at a specific level from a given set of courses."""
+
+    level: int
+    min_credits: int
+    course_codes: tuple[str, ...]
+
+    def is_satisfied(self, plan: DegreePlan) -> bool:
+        allowed = set(self.course_codes)
+        total = sum(
+            course.credits
+            for semester in plan.semesters
+            for course in semester.courses
+            if course.code in allowed and course.level == self.level
+        )
+        return total >= self.min_credits
+
+
+@dataclass(frozen=True)
+class MaxLevelCreditsRequirement(RequirementNode):
+    """Maximum credits from courses at a specific level."""
+
+    level: int
+    max_credits: int
+
+    def is_satisfied(self, plan: DegreePlan) -> bool:
+        total = 0
+        for semester in plan.semesters:
+            for course in semester.courses:
+                if course.level == self.level:
+                    total += course.credits
+        return total <= self.max_credits
+
+
+@dataclass(frozen=True)
 class TotalCreditsRequirement(RequirementNode):
     """Total credits required for the degree."""
 
     required_credits: int
 
     def is_satisfied(self, plan: DegreePlan) -> bool:
-        return plan.total_credits() >= self.required_credits
+        return plan.total_credits() == self.required_credits
 
 
 @dataclass(frozen=True)

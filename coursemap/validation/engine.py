@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from typing import Iterable, List
+from typing import List
 
 from coursemap.domain.plan import DegreePlan
-from coursemap.validation.rules import ValidationRule, ValidationError
+from coursemap.domain.requirement_nodes import RequirementNode
 
 
 @dataclass
@@ -12,19 +12,12 @@ class ValidationResult:
 
 
 class DegreeValidator:
-    def __init__(self, rules: Iterable[ValidationRule]):
-        self.rules: List[ValidationRule] = list(rules)
+    """Validates a degree plan against a requirement tree."""
+
+    def __init__(self, degree_requirement: RequirementNode):
+        self.degree_requirement = degree_requirement
 
     def validate(self, plan: DegreePlan) -> ValidationResult:
-        errors: List[str] = []
-
-        for rule in self.rules:
-            try:
-                rule.validate(plan)
-            except ValidationError as e:
-                errors.append(str(e))
-
-        return ValidationResult(
-            passed=len(errors) == 0,
-            errors=errors,
-        )
+        passed = self.degree_requirement.is_satisfied(plan)
+        errors = [] if passed else ["Degree requirements not satisfied"]
+        return ValidationResult(passed=passed, errors=errors)
