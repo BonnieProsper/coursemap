@@ -14,6 +14,7 @@ from coursemap.domain.requirement_serialization import requirement_from_dict
 DATASET_PATH = Path("datasets/courses.json")
 MAJORS_DATASET_PATH = Path("datasets/majors.json")
 REQUIREMENTS_DATASET_PATH = Path("datasets/requirements.json")
+DEGREE_REQUIREMENTS_DATASET_PATH = Path("datasets/degree_requirements.json")
 
 
 def _parse_offerings(raw):
@@ -127,3 +128,18 @@ def load_requirement_tree_from_file(path: Path = REQUIREMENTS_DATASET_PATH):
         raise FileNotFoundError(f"Requirement tree file not found: {path}")
     with open(path, encoding="utf-8") as f:
         return requirement_from_dict(json.load(f))
+
+
+def load_degree_requirement_tree():
+    """
+    Load the degree requirement tree from datasets/degree_requirements.json.
+    Returns a RequirementNode (root of the tree). Used as source of truth for validation.
+    """
+    if not DEGREE_REQUIREMENTS_DATASET_PATH.exists():
+        raise FileNotFoundError(
+            "datasets/degree_requirements.json not found. "
+            "Create it with a requirement node tree (e.g. ALL_OF with TOTAL_CREDITS)."
+        )
+    with open(DEGREE_REQUIREMENTS_DATASET_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    return requirement_from_dict(data)

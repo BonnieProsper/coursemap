@@ -8,8 +8,7 @@ from coursemap.domain.seed_data import (
 from coursemap.optimisation.scorer import PlanScorer
 from coursemap.services.planner_service import PlannerService
 from coursemap.validation.engine import DegreeValidator
-from coursemap.validation.tree_builder import build_requirement_tree
-from coursemap.ingestion.dataset_loader import load_courses
+from coursemap.ingestion.dataset_loader import load_courses, load_degree_requirement_tree
 
 
 
@@ -66,7 +65,7 @@ def main():
     scorer = PlanScorer()
     print(f"Plan Score: {scorer.score(plan):.2f}")
 
-    degree_requirement = build_requirement_tree(active_requirements)
+    degree_requirement = load_degree_requirement_tree()
     validator = DegreeValidator(degree_requirement)
     result = validator.validate(plan)
     if not result.passed:
