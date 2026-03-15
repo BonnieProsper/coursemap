@@ -1,14 +1,15 @@
-from dataclasses import replace
-
+from coursemap.domain.requirement_nodes import RequirementNode
 from coursemap.planner.generator import PlanGenerator
 from coursemap.optimisation.search import ExhaustivePlanSearch
 
 
 class PlannerService:
+    """Orchestrates plan generation. Uses degree requirement tree and majors from datasets."""
 
-    def __init__(self, courses, requirements):
+    def __init__(self, courses, degree_requirement: RequirementNode, majors: list):
         self.courses = courses
-        self.requirements = requirements
+        self.degree_requirement = degree_requirement
+        self.majors = majors
 
     def generate_best_plan(
         self,
@@ -18,8 +19,7 @@ class PlannerService:
         start_year: int = 2026,
         major_name: str | None = None,
     ):
-        requirements = self._requirements_for_major(major_name)
-        self.requirements = requirements
+        majors_to_use = self._majors_for_name(major_name)
 
         generator_template = PlanGenerator(
             self.courses,
@@ -31,29 +31,26 @@ class PlannerService:
 
         search = ExhaustivePlanSearch(
             courses=self.courses,
-            requirements=requirements,
+            degree_requirement=self.degree_requirement,
+            majors=majors_to_use,
             generator_template=generator_template,
         )
 
         return search.search()
 
-    def _requirements_for_major(self, major_name: str | None):
+    def _majors_for_name(self, major_name: str | None) -> list:
         if not major_name:
-            return self.requirements
+            return self.majors
 
         selected = [
-            major
-            for major in self.requirements.available_majors
-            if major.name.lower() == major_name.lower()
+            m for m in self.majors
+            if m["name"].lower() == major_name.lower()
         ]
 
         if not selected:
-            available = ", ".join(m.name for m in self.requirements.available_majors)
+            available = ", ".join(m["name"] for m in self.majors)
             raise ValueError(
                 f"Unknown major '{major_name}'. Available majors: {available}"
             )
 
-        return replace(
-            self.requirements,
-            available_majors=selected,
-        )
+        return selected

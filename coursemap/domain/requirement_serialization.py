@@ -4,7 +4,7 @@ Dataset format: each node is a dict with "type" and type-specific fields.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Set
 
 from .requirement_nodes import (
     AllOfRequirement,
@@ -124,3 +124,19 @@ def requirement_from_dict(data: Dict[str, Any]) -> RequirementNode:
             requirement=requirement_from_dict(data["requirement"]),
         )
     raise ValueError(f"Unknown requirement type: {typ!r}")
+
+
+def requirement_collect_course_codes(node: RequirementNode) -> Set[str]:
+    """Recursively collect all course codes mentioned in a requirement tree."""
+    out: Set[str] = set()
+    if isinstance(node, CourseRequirement):
+        out.add(node.course_code)
+    elif isinstance(node, (AllOfRequirement, AnyOfRequirement)):
+        for c in node.children:
+            out |= requirement_collect_course_codes(c)
+    elif isinstance(node, (ChooseCreditsRequirement, ChooseNRequirement, MinLevelCreditsFromRequirement)):
+        out.update(node.course_codes)
+    elif isinstance(node, MajorRequirement):
+        out |= requirement_collect_course_codes(node.requirement)
+    # MinLevelCreditsRequirement, MaxLevelCreditsRequirement, TotalCreditsRequirement: no course codes
+    return out

@@ -1,37 +1,38 @@
 from coursemap.domain.seed_data import build_seed_courses
-from coursemap.domain.degree_requirements import (
-    DegreeRequirements,
-    LevelCreditRequirement,
-)
-from coursemap.domain.electives import ElectivePool
+from coursemap.domain.requirement_serialization import requirement_from_dict
 from coursemap.planner.generator import PlanGenerator
 from coursemap.optimisation.search import ExhaustivePlanSearch
-from .course_requirements import build_realistic_requirements
+
 
 def test_exhaustive_search_returns_valid_plan():
     courses = build_seed_courses()
+    total_credits = sum(c.credits for c in courses.values())
 
-    requirements = DegreeRequirements(
-        total_credits=105,
-        max_100_level=None,
-        min_300_level=None,
-        level_requirements={
-            100: LevelCreditRequirement(100, 60),
-            200: LevelCreditRequirement(200, 30),
-            300: LevelCreditRequirement(300, 15),
+    degree_requirement = requirement_from_dict({
+        "type": "ALL_OF",
+        "children": [
+            {"type": "TOTAL_CREDITS", "required_credits": total_credits},
+        ],
+    })
+    majors = [
+        {
+            "name": "Default",
+            "url": "",
+            "requirement": {
+                "type": "ALL_OF",
+                "children": [
+                    {"type": "COURSE", "course_code": code}
+                    for code in sorted(courses.keys())
+                ],
+            },
         },
-        core_courses=set(courses.keys()),
-        min_schedule_credits=None,
-        required_majors=0,
-        available_majors=[],
-        elective_pools=[],
-    )
+    ]
 
     generator = PlanGenerator(courses)
-
     search = ExhaustivePlanSearch(
         courses,
-        requirements,
+        degree_requirement,
+        majors,
         generator,
     )
 
@@ -43,13 +44,48 @@ def test_exhaustive_search_returns_valid_plan():
 
 def test_realistic_search():
     courses = build_seed_courses()
-    requirements = build_realistic_requirements()
+    total_credits = 120
+    degree_requirement = requirement_from_dict({
+        "type": "ALL_OF",
+        "children": [
+            {"type": "TOTAL_CREDITS", "required_credits": total_credits},
+            {"type": "COURSE", "course_code": "MATH101"},
+            {"type": "COURSE", "course_code": "STAT101"},
+            {"type": "COURSE", "course_code": "COMP101"},
+            {
+                "type": "CHOOSE_CREDITS",
+                "credits": 30,
+                "course_codes": ["STAT201", "STAT202", "STAT203"],
+            },
+            {
+                "type": "CHOOSE_CREDITS",
+                "credits": 15,
+                "course_codes": ["STAT201", "MATH201"],
+            },
+        ],
+    })
+    majors = [
+        {
+            "name": "Default",
+            "url": "",
+            "requirement": {
+                "type": "ALL_OF",
+                "children": [
+                    {"type": "COURSE", "course_code": "MATH101"},
+                    {"type": "COURSE", "course_code": "STAT101"},
+                    {"type": "COURSE", "course_code": "COMP101"},
+                    {"type": "COURSE", "course_code": "STAT201"},
+                    {"type": "COURSE", "course_code": "MATH201"},
+                ],
+            },
+        },
+    ]
 
     generator = PlanGenerator(courses)
-
     search = ExhaustivePlanSearch(
         courses,
-        requirements,
+        degree_requirement,
+        majors,
         generator,
     )
 
@@ -57,7 +93,5 @@ def test_realistic_search():
 
     assert plan is not None
     assert sum(
-        c.credits
-        for s in plan.semesters
-        for c in s.courses
-    ) == 120
+        c.credits for s in plan.semesters for c in s.courses
+    ) == total_credits

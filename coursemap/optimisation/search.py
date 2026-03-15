@@ -1,14 +1,49 @@
 from itertools import combinations
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 from collections import defaultdict
 
 from coursemap.domain.course import Course
-from coursemap.domain.degree_requirements import DegreeRequirements
 from coursemap.domain.plan import DegreePlan
+from coursemap.domain.requirement_nodes import (
+    AllOfRequirement,
+    ChooseCreditsRequirement,
+    CourseRequirement,
+    RequirementNode,
+    TotalCreditsRequirement,
+)
+from coursemap.domain.requirement_serialization import (
+    requirement_collect_course_codes,
+    requirement_from_dict,
+)
 from coursemap.planner.generator import PlanGenerator
 from coursemap.validation.engine import DegreeValidator
-from coursemap.validation.tree_builder import build_requirement_tree
 from coursemap.optimisation.scorer import PlanScorer
+
+
+def _extract_enumeration_from_degree_tree(
+    root: RequirementNode,
+) -> Tuple[int, Set[str], List[Tuple[int, Tuple[str, ...]]]]:
+    """
+    Extract total_credits, core_courses, and elective_pools from the root degree
+    requirement (expected ALL_OF with TOTAL_CREDITS, COURSE, CHOOSE_CREDITS children).
+    Used by solver for enumeration only; validation uses the tree directly.
+    """
+    total_credits = 0
+    core_courses: Set[str] = set()
+    elective_pools: List[Tuple[int, Tuple[str, ...]]] = []
+
+    if not isinstance(root, AllOfRequirement):
+        return total_credits, core_courses, elective_pools
+
+    for child in root.children:
+        if isinstance(child, TotalCreditsRequirement):
+            total_credits = child.required_credits
+        elif isinstance(child, CourseRequirement):
+            core_courses.add(child.course_code)
+        elif isinstance(child, ChooseCreditsRequirement):
+            elective_pools.append((child.credits, child.course_codes))
+
+    return total_credits, core_courses, elective_pools
 
 
 class ExhaustivePlanSearch:
@@ -21,11 +56,13 @@ class ExhaustivePlanSearch:
     def __init__(
         self,
         courses: Dict[str, Course],
-        requirements: DegreeRequirements,
+        degree_requirement: RequirementNode,
+        majors: List[Dict],
         generator_template: PlanGenerator,
     ):
         self.courses = courses
-        self.requirements = requirements
+        self.degree_requirement = degree_requirement
+        self.majors = majors
         self.generator_template = generator_template
 
         # Diagnostics
@@ -42,20 +79,33 @@ class ExhaustivePlanSearch:
         self.prerequisite_pruned = 0
         self.failure_breakdown.clear()
 
+        total_credits, core_courses, elective_pools = _extract_enumeration_from_degree_tree(
+            self.degree_requirement
+        )
+        majors_with_codes: List[Dict] = []
+        for m in self.majors:
+            req = requirement_from_dict(m["requirement"])
+            majors_with_codes.append({
+                "name": m["name"],
+                "course_codes": requirement_collect_course_codes(req),
+            })
+
         best_plan: Optional[DegreePlan] = None
         best_score: Optional[float] = None
 
-        elective_combinations = self._generate_elective_combinations()
+        elective_combinations = self._generate_elective_combinations(elective_pools)
 
         print(f"Total elective combinations to evaluate: {len(elective_combinations)}")
 
-        for major in self.requirements.available_majors:
+        for major in majors_with_codes:
             for elective_set in elective_combinations:
                 self.total_attempts += 1
 
-                selected_courses = self._build_course_subset(elective_set, major)
+                selected_courses = self._build_course_subset(
+                    elective_set, major["course_codes"], core_courses
+                )
 
-                if not self._quick_credit_check(selected_courses):
+                if not self._quick_credit_check(selected_courses, total_credits):
                     continue
 
                 if not self._is_prerequisite_schedulable(selected_courses):
@@ -97,24 +147,27 @@ class ExhaustivePlanSearch:
 
         return best_plan
 
-    def _generate_elective_combinations(self) -> List[List[str]]:
-        if not self.requirements.elective_pools:
+    def _generate_elective_combinations(
+        self,
+        elective_pools: List[Tuple[int, Tuple[str, ...]]],
+    ) -> List[List[str]]:
+        if not elective_pools:
             return [[]]
 
         all_pool_selections: List[List[List[str]]] = []
 
-        for pool in self.requirements.elective_pools:
-            pool_courses = list(pool.course_codes)
+        for min_credits, pool_courses in elective_pools:
+            pool_courses_list = list(pool_courses)
             valid_combos: List[List[str]] = []
 
-            for r in range(1, len(pool_courses) + 1):
-                for combo in combinations(pool_courses, r):
+            for r in range(1, len(pool_courses_list) + 1):
+                for combo in combinations(pool_courses_list, r):
                     credits = sum(self.courses[c].credits for c in combo)
 
-                    if credits < pool.min_credits:
+                    if credits < min_credits:
                         continue
 
-                    if credits > pool.min_credits + 30:
+                    if credits > min_credits + 30:
                         continue  # soft upper bound
 
                     valid_combos.append(list(combo))
@@ -132,26 +185,30 @@ class ExhaustivePlanSearch:
 
         return results
 
-    def _build_course_subset(self, electives: List[str], major) -> Dict[str, Course]:
+    def _build_course_subset(
+        self,
+        electives: List[str],
+        major_course_codes: Set[str],
+        core_courses: Set[str],
+    ) -> Dict[str, Course]:
         selected: Dict[str, Course] = {}
 
-        # Core
-        for code in self.requirements.core_courses:
-            selected[code] = self.courses[code]
+        for code in core_courses:
+            if code in self.courses:
+                selected[code] = self.courses[code]
 
-        # Selected major
-        for code in major.required_courses:
-            selected[code] = self.courses[code]
+        for code in major_course_codes:
+            if code in self.courses:
+                selected[code] = self.courses[code]
 
-        # Electives
         for code in electives:
-            selected[code] = self.courses[code]
+            if code in self.courses:
+                selected[code] = self.courses[code]
 
         return selected
 
     def _validate(self, plan: DegreePlan):
-        degree_requirement = build_requirement_tree(self.requirements)
-        validator = DegreeValidator(degree_requirement)
+        validator = DegreeValidator(self.degree_requirement)
         return validator.validate(plan)
 
     def _score(self, plan: DegreePlan) -> float:
@@ -186,9 +243,11 @@ class ExhaustivePlanSearch:
         print(f"Success Rate: {rate:.2%}")
 
 
-    def _quick_credit_check(self, selected_courses: Dict[str, Course]) -> bool:
+    def _quick_credit_check(
+        self, selected_courses: Dict[str, Course], total_credits: int
+    ) -> bool:
         total = sum(c.credits for c in selected_courses.values())
-        return total == self.requirements.total_credits
+        return total == total_credits
 
     def _is_prerequisite_schedulable(
         self,

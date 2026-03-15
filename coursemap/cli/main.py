@@ -1,15 +1,14 @@
 import argparse
 import json
 
-from coursemap.domain.seed_data import (
-    build_course_catalog,
-    build_bsc_requirements,
-) # TODO: remove when nolonger needed
 from coursemap.optimisation.scorer import PlanScorer
 from coursemap.services.planner_service import PlannerService
 from coursemap.validation.engine import DegreeValidator
-from coursemap.ingestion.dataset_loader import load_courses, load_degree_requirement_tree
-
+from coursemap.ingestion.dataset_loader import (
+    load_courses,
+    load_degree_requirement_tree,
+    load_majors,
+)
 
 
 def main():
@@ -21,15 +20,15 @@ def main():
     args = parser.parse_args()
 
     courses = load_courses()
-    requirements = build_bsc_requirements()
+    majors = load_majors()
+    degree_requirement = load_degree_requirement_tree()
 
-    service = PlannerService(courses, requirements)
+    service = PlannerService(courses, degree_requirement, majors)
     plan = service.generate_best_plan(
         max_credits_per_semester=args.max_credits,
         start_year=args.start_year,
         major_name=args.major,
     )
-    active_requirements = service.requirements
 
     plan_data = []
 
@@ -65,7 +64,6 @@ def main():
     scorer = PlanScorer()
     print(f"Plan Score: {scorer.score(plan):.2f}")
 
-    degree_requirement = load_degree_requirement_tree()
     validator = DegreeValidator(degree_requirement)
     result = validator.validate(plan)
     if not result.passed:
