@@ -142,4 +142,46 @@ def load_degree_requirement_tree():
         )
     with open(DEGREE_REQUIREMENTS_DATASET_PATH, encoding="utf-8") as f:
         data = json.load(f)
-    return requirement_from_dict(data)
+
+    def _slug(name: str) -> str:
+        return (
+            name.strip()
+            .lower()
+            .replace("&", "and")
+            .replace("-", " ")
+        )
+
+    def _to_identifier(name: str) -> str:
+        s = _slug(name)
+        return "_".join([p for p in s.split() if p])
+
+    majors = load_majors()
+    if not isinstance(majors, list):
+        raise ValueError(
+            "datasets/majors.json must be a list of {name,url,requirement} objects "
+            "in requirement-node JSON format to resolve degree major references."
+        )
+    majors_by_id: Dict[str, Dict[str, Any]] = {
+        _to_identifier(m["name"]): m for m in majors if isinstance(m, dict) and "name" in m
+    }
+
+    def _resolve_refs(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            if "$ref" in obj and isinstance(obj["$ref"], str):
+                ref = obj["$ref"]
+                if ref.startswith("majors."):
+                    key = ref.split(".", 1)[1]
+                    if key not in majors_by_id:
+                        available = ", ".join(sorted(majors_by_id.keys()))
+                        raise KeyError(
+                            f"Unknown major ref '{ref}'. Available majors: {available}"
+                        )
+                    return majors_by_id[key]["requirement"]
+                raise ValueError(f"Unsupported $ref: {ref!r}")
+            return {k: _resolve_refs(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_resolve_refs(v) for v in obj]
+        return obj
+
+    resolved = _resolve_refs(data)
+    return requirement_from_dict(resolved)

@@ -52,28 +52,38 @@ class ExhaustivePlanSearch:
 
         total_credits = find_total_credits(self.degree_requirement)
         core_courses = collect_core_course_codes(self.degree_requirement)
-        elective_node_list = collect_elective_nodes(self.degree_requirement)
-        elective_pools: List[Tuple[int, Tuple[str, ...]]] = [
-            (n.credits, n.course_codes)
-            for n in elective_node_list
-            if isinstance(n, ChooseCreditsRequirement)
-        ]
+
         majors_with_codes: List[Dict] = []
         for m in self.majors:
-            req = requirement_from_dict(m["requirement"])
-            majors_with_codes.append({
-                "name": m["name"],
-                "course_codes": collect_course_codes(req),
-            })
+            major_req = requirement_from_dict(m["requirement"])
+            major_course_codes = collect_course_codes(major_req)
+            elective_nodes = collect_elective_nodes(major_req)
+            elective_pools: List[Tuple[int, Tuple[str, ...]]] = [
+                (n.credits, n.course_codes)
+                for n in elective_nodes
+                if isinstance(n, ChooseCreditsRequirement)
+            ]
+            majors_with_codes.append(
+                {
+                    "name": m["name"],
+                    "course_codes": major_course_codes,
+                    "elective_pools": elective_pools,
+                }
+            )
 
         best_plan: Optional[DegreePlan] = None
         best_score: Optional[float] = None
 
-        elective_combinations = self._generate_elective_combinations(elective_pools)
-
-        print(f"Total elective combinations to evaluate: {len(elective_combinations)}")
-
         for major in majors_with_codes:
+            elective_combinations = self._generate_elective_combinations(
+                major["elective_pools"]
+            )
+
+            print(
+                f"Evaluating major '{major['name']}' with "
+                f"{len(elective_combinations)} elective combinations"
+            )
+
             for elective_set in elective_combinations:
                 self.total_attempts += 1
 
