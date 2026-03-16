@@ -1,9 +1,0 @@
-{
-  "type": "ALL_OF",
-  "children": [
-    {
-      "type": "TOTAL_CREDITS",
-      "required_credits": 360
-    }
-  ]
-}
