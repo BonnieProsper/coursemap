@@ -14,7 +14,7 @@ class PlanGenerator:
         self,
         courses: Dict[str, Course],
         max_credits_per_semester: int = 60,
-        campus: str = "PN",
+        campus: str = "D",
         mode: str = "internal",
         start_year: int = 2026,
     ):
