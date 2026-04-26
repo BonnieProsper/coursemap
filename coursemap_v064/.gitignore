@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checkers
+.mypy_cache/
+.ruff_cache/
+
+# Tools
+.env
+.envrc
+
+# Generated outputs (not source data)
+plan.json
+generated_plan.json

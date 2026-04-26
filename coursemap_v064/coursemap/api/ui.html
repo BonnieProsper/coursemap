@@ -1,0 +1,3103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>coursemap — Massey University Degree Planner</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;1,9..144,300&display=swap');
+
+  :root {
+    --ink:       #1a1a18;
+    --ink-mid:   #4a4a46;
+    --ink-faint: #9a9a94;
+    --paper:     #f7f6f0;
+    --paper-2:   #eeede6;
+    --paper-3:   #e4e3da;
+    --accent:    #2a5c45;
+    --accent-lt: #e8f2ed;
+    --accent-md: #4d8c6f;
+    --warn:      #8a4a0a;
+    --warn-lt:   #fef3e8;
+    --err:       #8a1a1a;
+    --err-lt:    #fef0f0;
+    --border:    rgba(26,26,24,0.12);
+    --border-md: rgba(26,26,24,0.22);
+    --radius:    6px;
+    --radius-lg: 10px;
+    --mono:      'DM Mono', monospace;
+    --serif:     'Fraunces', serif;
+    --sans:      -apple-system, 'Helvetica Neue', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    height: 52px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    font-family: var(--serif);
+    font-size: 20px;
+    font-weight: 300;
+    letter-spacing: -0.03em;
+    color: var(--paper);
+    text-decoration: none;
+  }
+
+  .logo span {
+    color: var(--accent-md);
+  }
+
+  .header-sub {
+    font-size: 12px;
+    color: rgba(247,246,240,0.45);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .freshness-badge {
+    margin-left: auto;
+    font-size: 11px;
+    font-family: var(--mono);
+    padding: 3px 8px;
+    border-radius: 20px;
+    background: rgba(255,255,255,0.08);
+    color: rgba(247,246,240,0.55);
+  }
+
+  .freshness-badge.stale {
+    background: rgba(138,74,10,0.35);
+    color: #f4c07a;
+  }
+
+  /* ── Layout ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    height: calc(100vh - 52px);
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    background: var(--paper-2);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 1.5rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .sidebar h2 {
+    font-family: var(--serif);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 0.5rem;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 5px; }
+
+  label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-mid);
+    letter-spacing: 0.02em;
+  }
+
+  input[type="text"], input[type="number"], select {
+    width: 100%;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 13px;
+    font-family: var(--sans);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  input:focus, select:focus {
+    border-color: var(--accent);
+  }
+
+  .suggest-box {
+    position: relative;
+  }
+
+  .suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--paper);
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    z-index: 200;
+    max-height: 220px;
+    overflow-y: auto;
+    display: none;
+  }
+
+  .suggestions.open { display: block; }
+
+  .suggestion-item {
+    padding: 8px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--ink);
+    transition: background 0.1s;
+    line-height: 1.3;
+  }
+
+  .suggestion-item:hover, .suggestion-item.active {
+    background: var(--accent-lt);
+    color: var(--accent);
+  }
+
+  .row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+  }
+
+  .toggle-label {
+    font-size: 13px;
+    color: var(--ink-mid);
+  }
+
+  /* Toggle switch */
+  .toggle {
+    position: relative;
+    width: 36px;
+    height: 20px;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    background: var(--border-md);
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle input:checked + .toggle-track { background: var(--accent); }
+  .toggle-thumb {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background: white;
+    border-radius: 50%;
+    top: 3px;
+    left: 3px;
+    transition: transform 0.2s;
+    pointer-events: none;
+  }
+  .toggle input:checked ~ .toggle-thumb { transform: translateX(16px); }
+
+  .tag-input-wrap {
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius);
+    background: var(--paper);
+    padding: 4px 6px;
+    min-height: 34px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    cursor: text;
+  }
+
+  .tag-input-wrap:focus-within { border-color: var(--accent); }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--accent-lt);
+    color: var(--accent);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 12px;
+    font-family: var(--mono);
+  }
+
+  .tag button {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    padding: 0;
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0.6;
+  }
+
+  .tag button:hover { opacity: 1; }
+
+  .tag-input-wrap input {
+    border: none;
+    background: none;
+    outline: none;
+    font-size: 12px;
+    font-family: var(--mono);
+    min-width: 80px;
+    flex: 1;
+    padding: 2px 4px;
+    height: auto;
+  }
+
+  .btn-generate {
+    width: 100%;
+    padding: 10px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: var(--sans);
+    letter-spacing: 0.02em;
+    transition: background 0.15s, transform 0.1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .btn-generate:hover { background: #1e4a36; }
+  .btn-generate:active { transform: scale(0.98); }
+  .btn-generate:disabled { background: var(--border-md); cursor: not-allowed; transform: none; }
+
+  .btn-secondary {
+    padding: 7px 14px;
+    background: var(--paper);
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius);
+    font-size: 12px;
+    cursor: pointer;
+    font-family: var(--sans);
+    color: var(--ink-mid);
+    transition: background 0.15s, border-color 0.15s;
+  }
+
+  .btn-secondary:hover {
+    background: var(--paper-2);
+    border-color: var(--border-md);
+    color: var(--ink);
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 0.25rem 0;
+  }
+
+  /* ── Main content ── */
+  .main {
+    overflow-y: auto;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  /* ── Empty state ── */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    color: var(--ink-faint);
+    text-align: center;
+    padding: 4rem 2rem;
+  }
+
+  .empty-icon {
+    font-size: 48px;
+    opacity: 0.3;
+  }
+
+  .empty-state h3 {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 300;
+    color: var(--ink-mid);
+  }
+
+  .empty-state p {
+    font-size: 13px;
+    max-width: 320px;
+    line-height: 1.6;
+  }
+
+  /* ── Loading spinner ── */
+  .spinner-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    color: var(--ink-faint);
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  /* ── Plan output ── */
+  .plan-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .plan-title h1 {
+    font-family: var(--serif);
+    font-size: 26px;
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: var(--ink);
+  }
+
+  .plan-title .sub {
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin-top: 4px;
+    font-family: var(--mono);
+    letter-spacing: 0.03em;
+  }
+
+  .plan-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  /* ── Summary cards ── */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+  }
+
+  .stat-card {
+    background: var(--paper-2);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+  }
+
+  .stat-card .val {
+    font-size: 24px;
+    font-weight: 500;
+    font-family: var(--serif);
+    color: var(--ink);
+    line-height: 1;
+  }
+
+  .stat-card .lbl {
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .stat-card.highlight .val { color: var(--accent); }
+  .stat-card.warn-card .val { color: var(--warn); }
+
+  /* ── Warning banners ── */
+  .warning-banner {
+    background: var(--warn-lt);
+    border: 1px solid rgba(138,74,10,0.25);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--warn);
+    display: flex;
+    gap: 8px;
+  }
+
+  /* ── Gap banner ── */
+  .gap-banner {
+    background: var(--paper-3);
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.25rem;
+  }
+
+  .gap-banner h4 {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+
+  .gap-banner p {
+    font-size: 12px;
+    color: var(--ink-mid);
+    line-height: 1.5;
+  }
+
+  .elective-list {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .elective-item {
+    display: grid;
+    grid-template-columns: 70px 36px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    font-size: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .elective-item:last-child { border-bottom: none; }
+
+  .elective-code { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+  .elective-cr { font-family: var(--mono); color: var(--ink-faint); }
+  .elective-title { color: var(--ink-mid); }
+  .elective-sem { font-size: 11px; color: var(--ink-faint); text-align: right; }
+
+  /* ── Semester blocks ── */
+  .semesters { display: flex; flex-direction: column; gap: 1.25rem; }
+
+  .semester-block {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--paper);
+  }
+
+  .semester-head {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 10px 16px;
+    background: var(--paper-2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .semester-label {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .semester-credits {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+
+  .semester-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .semester-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+  }
+
+  .semester-courses {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0;
+  }
+
+  .course-card {
+    padding: 12px 16px;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.12s;
+    position: relative;
+  }
+
+  .course-card:hover { background: var(--accent-lt); }
+
+  .course-card.filler {
+    background: rgba(77,140,111,0.04);
+  }
+
+  .course-card.filler::after {
+    content: 'elective';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 9px;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-md);
+    background: var(--accent-lt);
+    padding: 2px 5px;
+    border-radius: 3px;
+  }
+
+  .course-code {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    margin-bottom: 3px;
+  }
+
+  .course-title {
+    font-size: 13px;
+    color: var(--ink);
+    line-height: 1.3;
+  }
+
+  .course-meta {
+    display: flex;
+    gap: 8px;
+    margin-top: 5px;
+    font-size: 11px;
+    color: var(--ink-faint);
+    font-family: var(--mono);
+  }
+
+  /* ── Course detail drawer ── */
+  .drawer-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(26,26,24,0.35);
+    z-index: 300;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+
+  .drawer-overlay.open { opacity: 1; pointer-events: all; }
+
+  .drawer {
+    position: fixed;
+    top: 0;
+    right: -440px;
+    width: 420px;
+    height: 100vh;
+    background: var(--paper);
+    border-left: 1px solid var(--border-md);
+    padding: 1.5rem;
+    overflow-y: auto;
+    transition: right 0.25s cubic-bezier(0.32, 0, 0.15, 1);
+    z-index: 301;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .drawer.open { right: 0; }
+
+  .drawer-close {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: var(--ink-faint);
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+  }
+
+  .drawer-close:hover { background: var(--paper-2); color: var(--ink); }
+
+  .drawer-code {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+
+  .drawer-title {
+    font-family: var(--serif);
+    font-size: 20px;
+    font-weight: 300;
+    color: var(--ink);
+    line-height: 1.2;
+  }
+
+  .drawer-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .badge {
+    font-size: 11px;
+    font-family: var(--mono);
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--paper-2);
+    color: var(--ink-mid);
+    border: 1px solid var(--border);
+  }
+
+  .badge.level-1 { background: #e8f2ed; color: var(--accent); border-color: rgba(42,92,69,0.2); }
+  .badge.level-2 { background: #eff5e8; color: #3b6d11; border-color: rgba(59,109,17,0.2); }
+  .badge.level-3 { background: #fef3e8; color: var(--warn); border-color: rgba(138,74,10,0.2); }
+
+  .drawer-section h4 {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+    margin-bottom: 8px;
+  }
+
+  .offering-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .offering-pill {
+    font-size: 12px;
+    font-family: var(--mono);
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: var(--paper-2);
+    color: var(--ink-mid);
+    border: 1px solid var(--border);
+  }
+
+  .prereq-text {
+    font-size: 13px;
+    font-family: var(--mono);
+    color: var(--ink-mid);
+    background: var(--paper-2);
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    word-break: break-word;
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-md); border-radius: 10px; }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 10px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 400;
+    pointer-events: none;
+  }
+
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  .btn-secondary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* ── Semester load warning ── */
+  .load-warn {
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--warn);
+    background: var(--warn-lt);
+    border: 1px solid rgba(138,74,10,0.2);
+    border-radius: 4px;
+    padding: 2px 7px;
+    margin-left: auto;
+  }
+
+  /* ── Prerequisite tree in drawer ── */
+  .prereq-tree {
+    font-size: 12px;
+    font-family: var(--mono);
+    color: var(--ink-mid);
+    background: var(--paper-2);
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    line-height: 1.7;
+  }
+
+  .prereq-tree .pnode-and { color: var(--ink-faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; padding: 0 4px; }
+  .prereq-tree .pnode-or  { color: var(--ink-faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; padding: 0 4px; }
+  .prereq-tree .pnode-code {
+    display: inline-flex;
+    align-items: center;
+    background: var(--paper);
+    border: 1px solid var(--border-md);
+    border-radius: 4px;
+    padding: 1px 7px;
+    color: var(--accent);
+    cursor: pointer;
+    transition: background 0.12s;
+    text-decoration: none;
+  }
+  .prereq-tree .pnode-code:hover { background: var(--accent-lt); }
+
+  /* ── Mobile: hamburger menu ── */
+  .sidebar-toggle {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--paper);
+    cursor: pointer;
+    padding: 6px;
+    margin-left: auto;
+    margin-right: 0.5rem;
+    border-radius: var(--radius);
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sidebar-toggle:hover { background: rgba(255,255,255,0.1); }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; height: auto; }
+    .sidebar {
+      position: fixed;
+      top: 52px;
+      left: 0;
+      width: 100%;
+      max-width: 380px;
+      height: calc(100vh - 52px);
+      overflow-y: auto;
+      z-index: 150;
+      transform: translateX(-100%);
+      transition: transform 0.25s cubic-bezier(0.32, 0, 0.15, 1);
+      box-shadow: 4px 0 24px rgba(0,0,0,0.15);
+    }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      top: 52px;
+      background: rgba(26,26,24,0.35);
+      z-index: 140;
+    }
+    .sidebar-backdrop.open { display: block; }
+    .main { padding: 1rem; min-height: calc(100vh - 52px); }
+    .main-fab {
+      display: flex !important;
+    }
+    .drawer { width: 100%; right: -100%; }
+    .plan-header { flex-direction: column; }
+    .plan-actions { width: 100%; }
+    .plan-actions .btn-secondary { flex: 1; }
+    .sidebar-toggle { display: flex; }
+    .semester-courses { grid-template-columns: 1fr; }
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .elective-item { grid-template-columns: 64px 30px 1fr auto; }
+    /* Compact card layout on mobile */
+    .course-card {
+      display: grid;
+      grid-template-columns: 68px 1fr auto;
+      grid-template-rows: auto;
+      align-items: center;
+      gap: 0 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+    }
+    .course-code {
+      font-size: 10px;
+      grid-row: 1 / 3;
+      align-self: center;
+    }
+    .course-title {
+      font-size: 11px;
+      line-height: 1.3;
+      grid-column: 2;
+      grid-row: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .course-meta {
+      font-size: 10px;
+      grid-column: 2;
+      grid-row: 2;
+    }
+    .modal-course-row { grid-template-columns: 60px 1fr 36px; }
+    .modal-course-sem { display: none; }
+    .year-group-header { padding: 10px 0 4px; }
+    .degree-progress-wrap { padding: 10px 12px; }
+  }
+
+  /* ── Validation panel ── */
+  .validation-panel {
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+  }
+  .validation-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+    user-select: none;
+    background: var(--paper-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .validation-header:hover { background: var(--paper-3); }
+  .validation-status {
+    font-size: 11px;
+    font-family: var(--mono);
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+    letter-spacing: 0.04em;
+  }
+  .validation-status.pass { background: var(--accent-lt); color: var(--accent); }
+  .validation-status.fail { background: var(--err-lt); color: var(--err); }
+  .validation-body { padding: 12px 16px; display: none; }
+  .validation-body.open { display: block; }
+  .checklist-item {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 5px 0;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .checklist-item:last-child { border-bottom: none; }
+  .check-icon { flex-shrink: 0; font-size: 13px; margin-top: 1px; }
+  .check-pass { color: var(--accent); }
+  .check-fail { color: var(--err); }
+  .check-label { flex: 1; line-height: 1.4; }
+  .check-children { margin-left: 20px; }
+  .check-pool-peek {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-top: 3px;
+  }
+
+  /* ── Progress bar ── */
+  .degree-progress-wrap {
+    margin-bottom: 1.5rem;
+    background: var(--paper-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 14px 16px;
+  }
+  .degree-progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 8px;
+    color: var(--ink-mid);
+    font-family: var(--mono);
+  }
+  .degree-progress-label strong { color: var(--ink); }
+  .degree-progress-track {
+    height: 8px;
+    background: var(--paper-3);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+  }
+  .degree-progress-fill {
+    height: 100%;
+    border-radius: 4px 0 0 4px;
+    transition: width 0.6s ease;
+  }
+  .degree-progress-fill.completed { background: var(--accent); }
+  .degree-progress-fill.planned   { background: var(--accent-md); opacity: 0.55; }
+  .degree-progress-legend {
+    display: flex;
+    gap: 12px;
+    margin-top: 7px;
+    font-size: 10px;
+    color: var(--ink-faint);
+    font-family: var(--mono);
+  }
+  .degree-progress-legend span { display: flex; align-items: center; gap: 4px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── Course search modal ── */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(26,26,24,0.55);
+    z-index: 500;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--paper);
+    border-radius: var(--radius-lg);
+    width: min(620px, 95vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.22);
+  }
+  .modal-head {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .modal-head h3 { flex: 1; font-size: 15px; }
+  .modal-search-input {
+    flex: 1;
+    padding: 7px 12px;
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius);
+    font-size: 13px;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+  }
+  .modal-search-input:focus { outline: none; border-color: var(--accent); }
+  .modal-filters {
+    padding: 8px 20px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }
+  .filter-pill {
+    font-size: 11px;
+    font-family: var(--mono);
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border-md);
+    cursor: pointer;
+    background: var(--paper);
+    color: var(--ink-mid);
+    transition: all 0.1s;
+  }
+  .filter-pill.active, .filter-pill:hover {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  .modal-results {
+    overflow-y: auto;
+    flex: 1;
+    padding: 8px 0;
+  }
+  .modal-course-row {
+    display: grid;
+    grid-template-columns: 68px 1fr 40px 80px;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 20px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-course-row:hover { background: var(--accent-lt); }
+  .modal-course-row:last-child { border-bottom: none; }
+  .modal-course-code { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+  .modal-course-title { font-size: 12px; line-height: 1.3; }
+  .modal-course-cr { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); text-align: right; }
+  .modal-course-sem { font-size: 10px; font-family: var(--mono); color: var(--ink-faint); }
+  .modal-empty { text-align: center; padding: 40px 20px; color: var(--ink-faint); font-size: 13px; }
+  .modal-count { font-size: 11px; font-family: var(--mono); color: var(--ink-faint); padding: 6px 20px; border-bottom: 1px solid var(--border); }
+
+  /* ── Year grouping headers ── */
+  .year-group-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 0 6px;
+    margin-top: 8px;
+  }
+  .year-group-header:first-child { margin-top: 0; }
+  .year-group-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+  }
+  .year-group-line {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+  .year-group-cr {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+
+  /* ── Share button ── */
+  #btn-share { margin-left: auto; }
+
+  /* ── HTML export ── */
+  .export-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 8px 0 0;
+  }
+
+  /* ── Semester load indicator dots ── */
+  .load-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-right: 2px;
+    vertical-align: middle;
+  }
+
+  /* ── Saved Plans ── */
+  .saved-plans-section {
+    margin-top: 0.25rem;
+  }
+  .saved-plans-section .section-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 0.4rem;
+  }
+  .saved-plan-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 6px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.12s;
+    font-size: 12.5px;
+  }
+  .saved-plan-item:hover { background: var(--paper-3); }
+  .saved-plan-item.active { background: var(--accent-lt); color: var(--accent); font-weight: 500; }
+  .saved-plan-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .saved-plan-item .plan-meta {
+    font-size: 11px;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .saved-plan-actions {
+    display: flex;
+    gap: 3px;
+    opacity: 0;
+    flex-shrink: 0;
+  }
+  .saved-plan-item:hover .saved-plan-actions { opacity: 1; }
+  .saved-plan-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 3px;
+    color: var(--ink-mid);
+    font-size: 12px;
+    line-height: 1;
+  }
+  .saved-plan-btn:hover { background: var(--paper-2); color: var(--err); }
+  .save-input-row {
+    display: flex;
+    gap: 4px;
+    margin-top: 0.4rem;
+  }
+  .save-input-row input {
+    flex: 1;
+    padding: 5px 8px;
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius);
+    font-size: 12.5px;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    min-width: 0;
+  }
+  .save-input-row input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .empty-saved {
+    font-size: 12px;
+    color: var(--ink-faint);
+    text-align: center;
+    padding: 8px 0;
+  }
+
+
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">course<span>map</span></a>
+  <span class="header-sub">Massey University — Degree Planner</span>
+  <div id="freshness-badge" class="freshness-badge">loading…</div>
+  <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" aria-label="Open settings">
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <rect x="2" y="4" width="14" height="1.5" rx="0.75" fill="currentColor"/>
+      <rect x="2" y="8.25" width="14" height="1.5" rx="0.75" fill="currentColor"/>
+      <rect x="2" y="12.5" width="14" height="1.5" rx="0.75" fill="currentColor"/>
+    </svg>
+  </button>
+</header>
+
+<!-- Mobile sidebar backdrop -->
+<div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
+
+<!-- Mobile FAB: open sidebar -->
+<button class="main-fab" id="main-fab" onclick="toggleSidebar()" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;width:52px;height:52px;border-radius:50%;background:var(--accent);color:white;border:none;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,0.2);z-index:130;font-size:22px;" aria-label="Open settings">⊕</button>
+
+<div class="layout">
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+    <div>
+      <h2>Major</h2>
+      <div class="field">
+        <label for="major-input">Search major</label>
+        <select id="qual-filter" style="margin-bottom:4px;font-size:12px;padding:4px 6px;border:1px solid var(--border-md);border-radius:var(--radius);background:var(--paper);color:var(--ink);width:100%" title="Filter by qualification type">
+          <option value="">All qualifications</option>
+        </select>
+        <div class="suggest-box">
+          <input type="text" id="major-input" placeholder="e.g. Computer Science" autocomplete="off">
+          <div class="suggestions" id="suggestions"></div>
+        </div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label for="double-major-input">Double major (optional)</label>
+        <div class="suggest-box">
+          <input type="text" id="double-major-input" placeholder="e.g. Mathematics" autocomplete="off">
+          <div class="suggestions" id="suggestions-dm"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+      <h2>Options</h2>
+      <div class="row-2">
+        <div class="field">
+          <label for="start-year">Start year</label>
+          <input type="number" id="start-year" value="2026" min="2025" max="2035">
+        </div>
+        <div class="field">
+          <label for="start-semester">Start semester</label>
+          <select id="start-semester">
+            <option value="S1">S1 — Feb</option>
+            <option value="S2">S2 — Jul</option>
+            <option value="SS">SS — Nov</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="max-credits">Credits/sem</label>
+          <select id="max-credits">
+            <option value="15">15cr — light load</option>
+            <option value="30">30cr — part-time</option>
+            <option value="45">45cr — 3 courses</option>
+            <option value="60" selected>60cr — full-time</option>
+            <option value="75">75cr — heavy load</option>
+            <option value="90">90cr — accelerated</option>
+            <option value="120">120cr — maximum</option>
+          </select>
+        </div>
+      </div>
+      <div class="row-2" style="margin-top:10px">
+        <div class="field">
+          <label for="campus">Campus</label>
+          <select id="campus">
+            <option value="D">D — Distance</option>
+            <option value="M">M — Manawatū</option>
+            <option value="A">A — Albany</option>
+            <option value="W">W — Wellington</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="DIS">DIS — distance</option>
+            <option value="INT">INT — internal</option>
+            <option value="BLK">BLK — block</option>
+          </select>
+        </div>
+      </div>
+      <div class="row-2" style="margin-top:10px">
+        <div class="field">
+          <label for="transfer">Transfer credits</label>
+          <input type="number" id="transfer" value="0" min="0" max="360" step="15" placeholder="0">
+        </div>
+        <div class="field">
+          <label for="max-per-sem" title="Maximum number of courses per semester (blank = no limit)">Max courses/sem</label>
+          <input type="number" id="max-per-sem" value="" min="1" max="10" placeholder="no limit">
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+      <h2>Course filters</h2>
+      <div class="field">
+        <label>Already completed</label>
+        <div class="tag-input-wrap" id="completed-wrap">
+          <input type="text" id="completed-input" placeholder="159101, 159102…">
+        </div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>Prefer electives</label>
+        <div class="tag-input-wrap" id="prefer-wrap">
+          <input type="text" id="prefer-input" placeholder="course codes…">
+        </div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>Exclude courses</label>
+        <div class="tag-input-wrap" id="exclude-wrap">
+          <input type="text" id="exclude-input" placeholder="course codes…">
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+      <h2>Flags</h2>
+      <div class="toggle-row">
+        <span class="toggle-label">Auto-fill free electives</span>
+        <label class="toggle">
+          <input type="checkbox" id="auto-fill">
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">Skip Summer School</span>
+        <label class="toggle">
+          <input type="checkbox" id="no-summer">
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+    </div>
+
+    <button class="btn-generate" id="btn-generate" onclick="generatePlan()">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <path d="M7 1v12M1 7h12" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      Generate plan
+    </button>
+
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn-secondary" onclick="downloadJson()" title="Download JSON">JSON</button>
+      <button class="btn-secondary" onclick="downloadIcal()" title="Download iCal">iCal</button>
+      <button class="btn-secondary" onclick="downloadHtml()" title="Download HTML plan">HTML</button>
+      <button class="btn-secondary" style="flex:1" id="btn-share" onclick="copyLink()" title="Copy shareable link" disabled>Share</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ── Saved Plans ── -->
+    <div class="saved-plans-section">
+      <div class="section-label">Saved plans</div>
+      <div id="saved-plans-list">
+        <div class="empty-saved">No saved plans yet.</div>
+      </div>
+      <div class="save-input-row" id="save-input-row" style="display:none">
+        <input id="save-plan-name" type="text" placeholder="Plan name…" maxlength="48"
+               onkeydown="if(event.key==='Enter')commitSavePlan();if(event.key==='Escape')cancelSavePlan();">
+        <button class="btn-secondary" style="padding:5px 10px;font-size:12px" onclick="commitSavePlan()">Save</button>
+        <button class="btn-secondary" style="padding:5px 8px;font-size:12px" onclick="cancelSavePlan()" title="Cancel">✕</button>
+      </div>
+      <button class="btn-secondary" id="btn-save-plan" style="width:100%;margin-top:0.4rem;font-size:12.5px" onclick="promptSavePlan()" disabled>
+        Save current plan…
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <main class="main" id="main">
+    <div class="empty-state" id="empty-state">
+      <div class="empty-icon">◎</div>
+      <h3>Plan your degree</h3>
+      <p>Search for a major on the left and click Generate plan to build a semester-by-semester schedule.</p>
+      <div style="margin-top:1.5rem;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <button class="btn-secondary" onclick="openCourseModal()" style="font-size:13px;padding:8px 18px">Browse courses</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ── Course detail drawer ── -->
+<div class="drawer-overlay" id="overlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <button class="drawer-close" onclick="closeDrawer()">✕</button>
+  <div id="drawer-content"></div>
+</div>
+
+<!-- ── Course search modal ── -->
+<div class="modal-overlay" id="course-modal" onclick="e => { if(e.target===this) closeCourseModal(); }">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <h3>Browse courses</h3>
+      <input class="modal-search-input" id="modal-search" type="text" placeholder="Search by title or code…" oninput="modalSearch(this.value)" autocomplete="off">
+      <button class="drawer-close" onclick="closeCourseModal()">✕</button>
+    </div>
+    <div class="modal-filters" id="modal-filters">
+      <span class="filter-pill active" data-level="" onclick="setModalLevel(this,'')">All levels</span>
+      <span class="filter-pill" data-level="100" onclick="setModalLevel(this,'100')">L100</span>
+      <span class="filter-pill" data-level="200" onclick="setModalLevel(this,'200')">L200</span>
+      <span class="filter-pill" data-level="300" onclick="setModalLevel(this,'300')">L300</span>
+    </div>
+    <div class="modal-count" id="modal-count">Loading…</div>
+    <div class="modal-results" id="modal-results"></div>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/api';   // proxied by FastAPI static mount — same origin
+let currentPlan = null;
+let fillerCodes = new Set();
+let allMajors = []; // [{name, url, qualification_type}]
+
+// ── Init ──────────────────────────────────────────────────────────────────
+
+async function init() {
+  try {
+    // Load freshness
+    const fr = await fetch(`${API}/`).then(r => r.json());
+    const badge = document.getElementById('freshness-badge');
+    if (fr.dataset) {
+      badge.textContent = `data: ${fr.dataset.scrape_date}`;
+      if (fr.dataset.is_stale) badge.classList.add('stale');
+    }
+    // Load all majors for autocomplete
+    const mRes = await fetch(`${API}/majors?limit=380`).then(r => r.json());
+    allMajors = mRes.majors;
+    // Build qualification filter options
+    const quals = [...new Set(allMajors.map(m => m.qualification_type).filter(Boolean))].sort();
+    const qualSel = document.getElementById('qual-filter');
+    if (qualSel) {
+      quals.forEach(q => {
+        const opt = document.createElement('option');
+        opt.value = q;
+        opt.textContent = q;
+        qualSel.appendChild(opt);
+      });
+    }
+  } catch(e) {
+    document.getElementById('freshness-badge').textContent = 'offline';
+  }
+
+  // Auto-detect current year and semester
+  (function() {
+    const now = new Date();
+    const yr = now.getFullYear();
+    const mo = now.getMonth() + 1; // 1-12
+    // Don't override if URL has a value
+    const p = new URLSearchParams(window.location.search);
+    if (!p.get('year')) {
+      document.getElementById('start-year').value = yr;
+    }
+    if (!p.get('sem')) {
+      // S1: Feb–Jun (2-6), S2: Jul–Nov (7-11), SS: Dec-Jan (12,1)
+      const sem = (mo >= 2 && mo <= 6) ? 'S1' : (mo >= 7 && mo <= 11) ? 'S2' : 'SS';
+      document.getElementById('start-semester').value = sem;
+    }
+  })();
+
+  // Restore from URL params
+  restoreFromUrl();
+
+  // Tag inputs
+  setupTagInput('completed-input', 'completed-wrap');
+  setupTagInput('prefer-input', 'prefer-wrap');
+  setupTagInput('exclude-input', 'exclude-wrap');
+
+  // Major autocomplete
+  setupAutocomplete('major-input', 'suggestions');
+  setupAutocomplete('double-major-input', 'suggestions-dm');
+}
+
+// ── Autocomplete ──────────────────────────────────────────────────────────
+
+function setupAutocomplete(inputId, suggestId) {
+  const inp = document.getElementById(inputId);
+  const box = document.getElementById(suggestId);
+  let activeIdx = -1;
+
+  inp.addEventListener('input', () => {
+    const q = inp.value.trim().toLowerCase();
+    if (!q || q.length < 2) { box.classList.remove('open'); return; }
+    const words = q.split(/\s+/);
+    const qualFilter = document.getElementById('qual-filter')?.value || '';
+    const matches = allMajors.filter(m => {
+      const name = m.name || m;
+      const toks = name.toLowerCase().replace(/[–—]/g,' ').split(/\s+/);
+      const wordOk = words.every(w => toks.some(t => t.includes(w)));
+      const qualOk = !qualFilter || (m.qualification_type === qualFilter);
+      return wordOk && qualOk;
+    }).slice(0, 14);
+    box.innerHTML = matches.map((m) => {
+      const name = m.name || m;
+      const qual = m.qualification_type || '';
+      const majorName = name.split(/\s+[–—]\s+/)[0];
+      const safeName = name.replace(/'/g,"\\'");
+      return `<div class="suggestion-item" data-val="${name}" onclick="pickSuggestion('${inputId}','${suggestId}','${safeName}')">
+        <span>${majorName}</span>${qual ? `<span style="color:var(--ink-faint);font-size:11px;display:block;margin-top:1px">${qual}</span>` : ''}
+      </div>`;
+    }).join('');
+    box.classList.toggle('open', matches.length > 0);
+    activeIdx = -1;
+  });
+
+  inp.addEventListener('keydown', e => {
+    const items = box.querySelectorAll('.suggestion-item');
+    if (e.key === 'ArrowDown') { activeIdx = Math.min(activeIdx+1, items.length-1); highlight(items, activeIdx); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { activeIdx = Math.max(activeIdx-1, 0); highlight(items, activeIdx); e.preventDefault(); }
+    else if (e.key === 'Enter' && activeIdx >= 0) { items[activeIdx].click(); e.preventDefault(); }
+    else if (e.key === 'Escape') box.classList.remove('open');
+  });
+
+  document.addEventListener('click', e => {
+    if (!inp.contains(e.target) && !box.contains(e.target)) box.classList.remove('open');
+  });
+}
+
+function highlight(items, idx) {
+  items.forEach((el, i) => el.classList.toggle('active', i === idx));
+  if (items[idx]) items[idx].scrollIntoView({block:'nearest'});
+}
+
+function pickSuggestion(inputId, suggestId, val) {
+  document.getElementById(inputId).value = val;
+  document.getElementById(suggestId).classList.remove('open');
+}
+
+// ── Tag inputs ────────────────────────────────────────────────────────────
+
+function setupTagInput(inputId, wrapId) {
+  const inp = document.getElementById(inputId);
+  inp.addEventListener('keydown', e => {
+    if (['Enter','Tab',','].includes(e.key) && inp.value.trim()) {
+      e.preventDefault();
+      addTag(wrapId, inp.value.trim().toUpperCase().replace(/,/g,''));
+      inp.value = '';
+    } else if (e.key === 'Backspace' && !inp.value) {
+      const tags = document.querySelectorAll(`#${wrapId} .tag`);
+      if (tags.length) tags[tags.length-1].remove();
+    }
+  });
+  document.getElementById(wrapId).addEventListener('click', () => inp.focus());
+}
+
+function addTag(wrapId, code) {
+  if (!code || code.length < 4) return;
+  const existing = [...document.querySelectorAll(`#${wrapId} .tag`)].map(t => t.dataset.code);
+  if (existing.includes(code)) return;
+  const tag = document.createElement('div');
+  tag.className = 'tag'; tag.dataset.code = code;
+  tag.innerHTML = `${code}<button onclick="this.parentElement.remove()" type="button">×</button>`;
+  document.getElementById(wrapId).insertBefore(tag, document.querySelector(`#${wrapId} input`));
+}
+
+function getTags(wrapId) {
+  return [...document.querySelectorAll(`#${wrapId} .tag`)].map(t => t.dataset.code);
+}
+
+// ── Generate plan ─────────────────────────────────────────────────────────
+
+async function generatePlan() {
+  const major = document.getElementById('major-input').value.trim();
+  if (!major) { toast('Enter a major name first.'); return; }
+
+  const doubleMajor = document.getElementById('double-major-input').value.trim() || null;
+  const autoFill = document.getElementById('auto-fill').checked;
+
+  const btn = document.getElementById('btn-generate');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+
+  showLoading();
+
+  // Close mobile sidebar on generate
+  closeSidebar();
+
+  const body = {
+    major,
+    double_major: doubleMajor,
+    start_year: parseInt(document.getElementById('start-year').value),
+    start_semester: document.getElementById('start-semester').value,
+    max_credits: parseInt(document.getElementById('max-credits').value),
+    max_per_semester: parseInt(document.getElementById('max-per-sem').value) || null,
+    campus: document.getElementById('campus').value,
+    mode: document.getElementById('mode').value,
+    transfer_credits: parseInt(document.getElementById('transfer').value) || 0,
+    completed: getTags('completed-wrap'),
+    prefer: getTags('prefer-wrap'),
+    exclude: getTags('exclude-wrap'),
+    no_summer: document.getElementById('no-summer').checked,
+    auto_fill: autoFill,
+  };
+
+  try {
+    const res = await fetch(`${API}/plan`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showError(data.detail || 'Plan generation failed.');
+    } else {
+      currentPlan = {request: body, response: data};
+      fillerCodes = new Set(data.filler_codes || []);
+      // Check prerequisite coverage warning
+      renderPrereqCoverageWarning(data);
+      renderPlan(data);
+      pushUrl(body);
+      // Enable share only after a plan is generated and URL is updated
+      const shareBtn = document.getElementById('btn-share');
+      if (shareBtn) { shareBtn.disabled = false; }
+      // Store plan data and enable save-plan button
+      window._lastPlanData = data;
+      const savePlanBtn = document.getElementById('btn-save-plan');
+      if (savePlanBtn) savePlanBtn.disabled = false;
+    }
+  } catch(e) {
+    showError('Network error — is the coursemap server running?');
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg> Generate plan';
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
+
+function showLoading() {
+  document.getElementById('empty-state') && (document.getElementById('empty-state').remove());
+  const main = document.getElementById('main');
+  main.innerHTML = `<div class="spinner-wrap"><div class="spinner"></div><span>Solving prerequisite graph…</span></div>`;
+}
+
+function showError(msg) {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="empty-state">
+      <div class="empty-icon" style="color:var(--err)">✕</div>
+      <h3 style="color:var(--err)">Could not generate plan</h3>
+      <p style="color:var(--err)">${escHtml(msg)}</p>
+    </div>`;
+}
+
+function renderPlan(data) {
+  const meta = data.meta;
+  const semesters = data.semesters;
+  const maxCr = Math.max(...semesters.map(s => s.credits));
+  const totalPlanned = meta.credits_planned + meta.credits_prior + meta.credits_transfer;
+  const gap = meta.free_elective_gap;
+  const isAutoFilled = meta.auto_filled_codes && meta.auto_filled_codes.length > 0;
+  // Remove any stale regen banner
+  document.getElementById('regen-banner')?.remove();
+  // Reset modal cache so new plan's campus/mode is used
+  modalCourseCache = null;
+
+  const main = document.getElementById('main');
+  main.innerHTML = '';
+
+  // ── Header
+  const hdr = document.createElement('div');
+  hdr.className = 'plan-header';
+  const degreeLabel = data.double_major_info
+    ? `${data.double_major_info.first_label} + ${data.double_major_info.second_label}`
+    : meta.major;
+  hdr.innerHTML = `
+    <div class="plan-title">
+      <h1>${escHtml(degreeLabel)}</h1>
+      <div class="sub">Starting ${meta.start_year} ${meta.start_semester || 'S1'} · ${meta.campus}/${meta.mode}</div>
+    </div>
+    <div class="plan-actions">
+      <button class="btn-secondary" onclick="downloadJson()">↓ JSON</button>
+      <button class="btn-secondary" onclick="downloadIcal()">↓ iCal</button>
+      <button class="btn-secondary" onclick="downloadHtml()">↓ HTML</button>
+      <button class="btn-secondary" onclick="openCourseModal()">Browse</button>
+    </div>`;
+  main.appendChild(hdr);
+
+  // ── Warnings
+  (data.warnings || []).forEach(w => {
+    const el = document.createElement('div');
+    el.className = 'warning-banner';
+    el.innerHTML = `<span>⚠</span><span>${escHtml(w)}</span>`;
+    main.appendChild(el);
+  });
+
+  // ── Stats
+  const grid = document.createElement('div');
+  grid.className = 'summary-grid';
+  const stats = [
+    { val: semesters.length, lbl: 'Semesters', cls: '' },
+    { val: `${totalPlanned}cr`, lbl: 'Credits', cls: 'highlight' },
+    { val: `${meta.degree_target}cr`, lbl: 'Degree target', cls: '' },
+    { val: gap > 0 ? `${gap}cr` : '—', lbl: 'Gap', cls: gap > 0 ? 'warn-card' : '' },
+  ];
+  if (data.double_major_info) {
+    stats.push({ val: `${data.double_major_info.saved_credits}cr`, lbl: 'Credits saved', cls: 'highlight' });
+  }
+  stats.forEach(s => {
+    const card = document.createElement('div');
+    card.className = `stat-card ${s.cls}`;
+    card.innerHTML = `<div class="val">${s.val}</div><div class="lbl">${s.lbl}</div>`;
+    grid.appendChild(card);
+  });
+  main.appendChild(grid);
+
+  // ── Double major shared-courses banner
+  if (data.double_major_info && sharedCodes.size > 0) {
+    const overlapBanner = document.createElement('div');
+    overlapBanner.className = 'gap-banner';
+    overlapBanner.style.cssText = 'border-color:var(--accent-md);margin-bottom:1rem';
+    const sharedList = [...sharedCodes].map(code => {
+      const course = data.semesters.flatMap(s => s.courses).find(c => c.code === code);
+      return `<span class="pnode-code" style="cursor:pointer" onclick="openDrawer('${code}')"
+        title="${course ? escHtml(course.title) : ''}">${code}</span>`;
+    }).join('');
+    overlapBanner.innerHTML = `
+      <h4>Shared courses
+        <span style="font-weight:400;color:var(--ink-faint)">
+          (${sharedCodes.size} · ${data.double_major_info.saved_credits}cr saved)
+        </span>
+      </h4>
+      <p style="margin:4px 0 10px;font-size:12px">
+        These courses satisfy requirements for both majors. They appear with a
+        <strong style="color:var(--accent)">×2</strong> badge in the plan below.
+      </p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${sharedList}</div>`;
+    main.appendChild(overlapBanner);
+  }
+
+  // ── Progress bar
+  renderProgressBar(main, meta);
+
+  // ── Validation panel (async)
+  if (currentPlan) renderValidationPanel(main, currentPlan.request);
+
+  // ── Massey academic calendar — approximate semester dates
+  // Source: Massey University academic calendar (public). Dates are approximate
+  // and shift by a few days each year. Students must verify at massey.ac.nz.
+  const masseyCalendar = {
+    S1:  { label: 'Feb – Jun',  enrolBy: 'late Jan',  resultsBy: 'mid Jul' },
+    S2:  { label: 'Jul – Nov',  enrolBy: 'late Jun',  resultsBy: 'mid Dec' },
+    SS:  { label: 'Nov – Feb',  enrolBy: 'early Nov', resultsBy: 'late Feb' },
+  };
+
+  // ── Semesters (grouped by year)
+  const semsWrap = document.createElement('div');
+  semsWrap.className = 'semesters';
+  const yearGroups = groupSemestersByYear(semesters);
+  let semIdx = 0;
+  let prevYear = null;
+  semesters.forEach(sem => {
+    // Year divider header
+    if (sem.year !== prevYear) {
+      const yearHdr = document.createElement('div');
+      yearHdr.className = 'year-group-header';
+      const yearCr = semesters.filter(s => s.year === sem.year).reduce((a,s) => a+s.credits, 0);
+      yearHdr.innerHTML = `
+        <span class="year-group-label">${sem.year}</span>
+        <span class="year-group-line"></span>
+        <span class="year-group-cr">${yearCr}cr this year</span>`;
+      semsWrap.appendChild(yearHdr);
+      prevYear = sem.year;
+    }
+
+    const block = document.createElement('div');
+    block.className = 'semester-block';
+
+    const pct = Math.round((sem.credits / (maxCr || 60)) * 100);
+    const highLevelCr = sem.courses.filter(c => c.level >= 300).reduce((a,c) => a+c.credits, 0);
+    let loadWarn = '';
+    if (sem.credits > 60) {
+      loadWarn = `<span class="load-warn" title="Very heavy semester load">⚠ ${sem.credits}cr</span>`;
+    } else if (semIdx < 2 && highLevelCr >= 30) {
+      loadWarn = `<span class="load-warn" title="${highLevelCr}cr of level-300 courses in an early semester">⚠ L3 early</span>`;
+    } else if (sem.courses.length > 4) {
+      loadWarn = `<span class="load-warn" title="${sem.courses.length} courses in one semester">⚠ ${sem.courses.length} courses</span>`;
+    }
+
+    // "Mark semester complete" button — only show for past/current semesters
+    const nowYear = new Date().getFullYear();
+    const nowSem  = new Date().getMonth() < 6 ? 'S1' : 'S2';
+    const isPast  = sem.year < nowYear || (sem.year === nowYear && sem.semester <= nowSem);
+    const markBtn = isPast
+      ? `<button class="btn-secondary" style="padding:2px 8px;font-size:10px;margin-left:auto" title="Mark all as completed"
+           onclick="event.stopPropagation();markSemesterComplete(${JSON.stringify(sem.courses.map(c=>c.code))})">✓ done</button>`
+      : '';
+
+    const cal = masseyCalendar[sem.semester] || {};
+    const calLabel = cal.label ? ` · ${cal.label}` : '';
+    const enrolTip = cal.enrolBy ? `Enrol by ${cal.enrolBy} · Results ${cal.resultsBy}` : '';
+    block.innerHTML = `
+      <div class="semester-head" title="${enrolTip}">
+        <span class="semester-label">${sem.year} ${sem.semester}<span style="font-weight:400;opacity:0.55;font-size:10px;margin-left:6px">${calLabel}</span></span>
+        <span class="semester-credits">${sem.credits}cr</span>
+        <div class="semester-bar"><div class="semester-bar-fill" style="width:${pct}%"></div></div>
+        ${loadWarn}
+        ${markBtn}
+      </div>
+      <div class="semester-courses" id="sem-${sem.year}-${sem.semester}"></div>`;
+
+    const grid2 = block.querySelector('.semester-courses');
+    sem.courses.forEach(c => {
+      const isFiller = fillerCodes.has(c.code);
+      const card = document.createElement('div');
+      card.className = `course-card${isFiller ? ' filler' : ''}`;
+      card.onclick = () => openDrawer(c.code);
+      card.innerHTML = `
+        <div class="course-code">${c.code}</div>
+        <div class="course-title">${escHtml(c.title)}</div>
+        <div class="course-meta">
+          <span>${c.credits}cr</span>
+          <span>L${c.level}</span>
+          <button class="btn-secondary" style="padding:1px 6px;font-size:9px;margin-left:auto;opacity:0.6"
+            title="Mark as completed"
+            onclick="event.stopPropagation();markCompleted('${c.code}')">✓</button>
+        </div>`;
+      grid2.appendChild(card);
+    });
+
+    semsWrap.appendChild(block);
+    semIdx++;
+  });
+  main.appendChild(semsWrap);
+
+  // ── Prerequisite bottleneck analysis (async, non-blocking)
+  renderBottleneckAnalysis(main, data);
+
+  // ── Gap / elective suggestions
+  if (gap > 0 && !isAutoFilled) {
+    renderGapBanner(main, meta, data);
+  } else if (isAutoFilled) {
+    const banner = document.createElement('div');
+    banner.className = 'gap-banner';
+    banner.innerHTML = `
+      <h4>Free electives auto-filled (${meta.auto_filled_codes.length} courses, ${meta.auto_filled_codes.reduce((a,c) => {
+        const s = semesters.flatMap(s=>s.courses).find(x=>x.code===c);
+        return a + (s ? s.credits : 0);
+      }, 0)}cr)</h4>
+      <p>These subject-area courses were selected to complete your degree. Click any to view details.</p>
+      <div class="elective-list">
+        ${meta.auto_filled_codes.map(code => {
+          const course = semesters.flatMap(s=>s.courses).find(c=>c.code===code);
+          if (!course) return '';
+          return `<div class="elective-item">
+            <span class="elective-code">${code}</span>
+            <span class="elective-cr">${course.credits}cr</span>
+            <span class="elective-title">${escHtml(course.title)}</span>
+            <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="openDrawer('${code}')">view</button>
+          </div>`;
+        }).join('')}
+      </div>`;
+    main.appendChild(banner);
+  }
+}
+
+async function renderBottleneckAnalysis(main, data) {
+  // Find the deepest-chain courses in the plan — these explain why the
+  // degree takes as many semesters as it does.
+  const allCourses = data.semesters.flatMap(s => s.courses);
+  if (allCourses.length === 0) return;
+
+  // Sample the highest-level courses (likely to have deepest chains)
+  const candidates = allCourses
+    .filter(c => c.level >= 300)
+    .sort((a, b) => b.level - a.level)
+    .slice(0, 8);
+
+  if (candidates.length === 0) return;
+
+  try {
+    const chains = await Promise.all(
+      candidates.map(c =>
+        fetch(`${API}/courses/${c.code}/prereq-chain`)
+          .then(r => r.json())
+          .then(d => ({ code: c.code, title: c.title, depth: d.chain_depth, nodes: d.nodes }))
+          .catch(() => null)
+      )
+    );
+
+    const valid = chains.filter(c => c && c.depth >= 3);
+    if (valid.length === 0) return;
+
+    valid.sort((a, b) => b.depth - a.depth);
+    const top = valid.slice(0, 3);
+
+    const banner = document.createElement('div');
+    banner.className = 'gap-banner';
+    banner.style.cssText = 'border-color:var(--border);';
+    banner.innerHTML = `
+      <h4 style="margin-bottom:8px">Why does this degree take ${data.semesters.length} semesters?</h4>
+      <p style="margin-bottom:10px">These courses have the deepest prerequisite chains — they determine your minimum degree length.</p>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${top.map(c => {
+          const byDepth = {};
+          c.nodes.forEach(n => { if (!byDepth[n.depth]) byDepth[n.depth] = []; byDepth[n.depth].push(n.code); });
+          const chain = Object.keys(byDepth).sort((a,b)=>a-b).map(d => byDepth[d].join('/')).join(' → ');
+          return `<div style="font-size:12px">
+            <span style="font-family:var(--mono);color:var(--accent)">${c.code}</span>
+            <span style="color:var(--ink-faint);font-family:var(--mono);font-size:11px"> · ${c.depth} semester${c.depth!==1?'s':''} of prereqs</span>
+            <div style="margin-top:3px;color:var(--ink-mid);font-family:var(--mono);font-size:11px;word-break:break-word">${escHtml(chain)}</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    main.appendChild(banner);
+  } catch(e) {}
+}
+
+async function renderGapBanner(main, meta, data) {
+  const banner = document.createElement('div');
+  banner.className = 'gap-banner';
+
+  // Fetch suggestions from API
+  let suggestHtml = '<p style="color:var(--ink-faint);font-size:12px">Loading suggestions…</p>';
+  banner.innerHTML = `<h4>${meta.free_elective_gap}cr of free electives still needed to complete your degree</h4>${suggestHtml}`;
+  main.appendChild(banner);
+
+  try {
+    const req = currentPlan.request;
+    const res = await fetch(`${API}/courses?search=&campus=${req.campus}&mode=${req.mode}&limit=200`).then(r => r.json());
+    const planned = new Set(data.semesters.flatMap(s => s.courses.map(c => c.code)));
+    const prefixCounts = {};
+    planned.forEach(code => { const p = code.slice(0,3); prefixCounts[p] = (prefixCounts[p]||0)+1; });
+    const topPrefix = Object.entries(prefixCounts).sort((a,b)=>b[1]-a[1]).slice(0,3).map(e=>e[0]);
+
+    const suggestions = res.courses
+      .filter(c => !planned.has(c.code) && topPrefix.includes(c.code.slice(0,3)))
+      .slice(0, 8);
+
+    if (suggestions.length) {
+      banner.innerHTML = `
+        <h4>${meta.free_elective_gap}cr of free electives to self-select</h4>
+        <p>Suggested courses from your subject area. Toggle <strong>Auto-fill</strong> to schedule them automatically.</p>
+        <div class="elective-list">
+          ${suggestions.map(c => `
+            <div class="elective-item">
+              <span class="elective-code">${c.code}</span>
+              <span class="elective-cr">${c.credits}cr</span>
+              <span class="elective-title">${escHtml(c.title)}</span>
+              <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="openDrawer('${c.code}')">view</button>
+            </div>`).join('')}
+        </div>`;
+    } else {
+      banner.innerHTML = `
+        <h4>${meta.free_elective_gap}cr of free electives to self-select</h4>
+        <p>Browse the full catalogue to find courses for your remaining credits.</p>`;
+    }
+  } catch(e) {}
+}
+
+// ── Course drawer ─────────────────────────────────────────────────────────
+
+async function openDrawer(code) {
+  const overlay = document.getElementById('overlay');
+  const drawer = document.getElementById('drawer');
+  const content = document.getElementById('drawer-content');
+
+  overlay.classList.add('open');
+  drawer.classList.add('open');
+  content.innerHTML = `<div class="spinner-wrap" style="min-height:200px"><div class="spinner"></div></div>`;
+
+  try {
+    const c = await fetch(`${API}/courses/${code}`).then(r => r.json());
+    const levelCls = c.level >= 300 ? 'level-3' : c.level >= 200 ? 'level-2' : 'level-1';
+
+    const offeringPills = c.offerings.map(o =>
+      `<span class="offering-pill">${o.semester} ${o.campus}/${o.mode}</span>`
+    ).join('');
+
+    // Render prerequisite tree
+    let prereqHtml = '';
+    if (c.prerequisites_human) {
+      const rendered = renderPrereqTree(c.prerequisites);
+      prereqHtml = `
+      <div class="drawer-section">
+        <h4>Prerequisites</h4>
+        <div class="prereq-tree">${rendered || escHtml(c.prerequisites_human)}</div>
+      </div>`;
+    }
+
+    content.innerHTML = `
+      <div class="drawer-code">${c.code}</div>
+      <div class="drawer-title">${escHtml(c.title)}</div>
+      <div class="drawer-meta">
+        <span class="badge ${levelCls}">Level ${c.level}</span>
+        <span class="badge">${c.credits} credits</span>
+      </div>
+
+      <div class="drawer-section" style="margin-top:1.25rem">
+        <h4>Offerings</h4>
+        <div class="offering-grid">${offeringPills || '<span style="color:var(--ink-faint);font-size:12px">No active offerings</span>'}</div>
+      </div>
+
+      ${prereqHtml}
+
+      <div id="prereq-chain-section"></div>
+
+      <div style="margin-top:1.5rem;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-secondary" style="flex:1" onclick="addTag('exclude-wrap','${code}');closeDrawer();toast('${code} added to exclude list')">
+          Exclude
+        </button>
+        <button class="btn-secondary" style="flex:1" onclick="addTag('prefer-wrap','${code}');closeDrawer();toast('${code} added to prefer list')">
+          Prefer
+        </button>
+        ${c.prerequisites ? `<button class="btn-secondary" style="flex:1" onclick="loadPrereqChain('${code}')">Show chain</button>` : ''}
+        <button class="btn-secondary" style="flex:1" onclick="loadExplain('${code}')">Explain</button>
+      </div>
+      <div id="explain-section"></div>`;
+  } catch(e) {
+    content.innerHTML = `<p style="color:var(--err)">Failed to load course details.</p>`;
+  }
+}
+
+function closeDrawer() {
+  document.getElementById('overlay').classList.remove('open');
+  document.getElementById('drawer').classList.remove('open');
+}
+
+// ── Exports ───────────────────────────────────────────────────────────────
+
+function downloadJson() {
+  if (!currentPlan) { toast('Generate a plan first.'); return; }
+  const blob = new Blob([JSON.stringify(currentPlan.response, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'degree_plan.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadIcal() {
+  if (!currentPlan) { toast('Generate a plan first.'); return; }
+  try {
+    const res = await fetch(`${API}/plan/ical`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(currentPlan.request),
+    });
+    if (!res.ok) { toast('iCal export failed.'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'degree_plan.ics'; a.click();
+    URL.revokeObjectURL(url);
+    toast('Calendar downloaded — import into Google Calendar or Apple Calendar.');
+  } catch(e) { toast('iCal export failed.'); }
+}
+
+function copyLink() {
+  navigator.clipboard.writeText(window.location.href)
+    .then(() => toast('Plan URL copied to clipboard.'))
+    .catch(() => toast('Copy failed.'));
+}
+
+// ── URL state ────────────────────────────────────────────────────────────
+
+function pushUrl(req) {
+  const p = new URLSearchParams();
+  p.set('major', req.major);
+  if (req.double_major) p.set('dm', req.double_major);
+  if (req.auto_fill) p.set('fill', '1');
+  if (req.no_summer) p.set('ns', '1');
+  p.set('year', req.start_year);
+  if (req.start_semester && req.start_semester !== 'S1') p.set('sem', req.start_semester);
+  if (req.campus !== 'D') p.set('campus', req.campus);
+  if (req.mode !== 'DIS') p.set('mode', req.mode);
+  if (req.max_credits !== 60) p.set('cr', req.max_credits);
+  if (req.max_per_semester) p.set('mps', req.max_per_semester);
+  if (req.transfer_credits) p.set('tx', req.transfer_credits);
+  if (req.completed.length) p.set('done', req.completed.join(','));
+  if (req.prefer.length) p.set('prefer', req.prefer.join(','));
+  if (req.exclude.length) p.set('excl', req.exclude.join(','));
+  window.history.replaceState({}, '', '?' + p.toString());
+}
+
+function restoreFromUrl() {
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('major')) document.getElementById('major-input').value = p.get('major');
+  if (p.get('dm')) document.getElementById('double-major-input').value = p.get('dm');
+  if (p.get('fill')) document.getElementById('auto-fill').checked = true;
+  if (p.get('ns')) document.getElementById('no-summer').checked = true;
+  if (p.get('year')) document.getElementById('start-year').value = p.get('year');
+  if (p.get('sem')) document.getElementById('start-semester').value = p.get('sem');
+  if (p.get('campus')) document.getElementById('campus').value = p.get('campus');
+  if (p.get('mode')) document.getElementById('mode').value = p.get('mode');
+  if (p.get('cr')) document.getElementById('max-credits').value = p.get('cr');
+  if (p.get('mps')) document.getElementById('max-per-sem').value = p.get('mps');
+  if (p.get('tx')) document.getElementById('transfer').value = p.get('tx');
+  p.get('done')?.split(',').filter(Boolean).forEach(c => addTag('completed-wrap', c));
+  p.get('prefer')?.split(',').filter(Boolean).forEach(c => addTag('prefer-wrap', c));
+  p.get('excl')?.split(',').filter(Boolean).forEach(c => addTag('exclude-wrap', c));
+  // Auto-generate if major in URL
+  if (p.get('major')) setTimeout(generatePlan, 300);
+}
+
+// ── Utilities ────────────────────────────────────────────────────────────
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+function markSemesterComplete(codes) {
+  let added = 0;
+  codes.forEach(code => {
+    const wrap = document.getElementById('completed-wrap');
+    const existing = [...wrap.querySelectorAll('.tag-item')].map(el => el.dataset.value);
+    if (!existing.includes(code)) { addTag('completed-wrap', code); added++; }
+  });
+  toast(`${added} course${added !== 1 ? 's' : ''} marked completed — regenerate to update plan`);
+  const main = document.getElementById('main');
+  let regen = document.getElementById('regen-banner');
+  if (added > 0 && !regen) {
+    regen = document.createElement('div');
+    regen.id = 'regen-banner';
+    regen.className = 'warning-banner';
+    regen.style.cssText = 'position:sticky;bottom:16px;z-index:50;justify-content:space-between;box-shadow:0 4px 16px rgba(0,0,0,0.12)';
+    regen.innerHTML = `<span>⟳ Completed courses updated</span><button class="btn-secondary" style="padding:4px 12px;font-size:12px" onclick="generatePlan();document.getElementById('regen-banner')?.remove()">Regenerate plan</button>`;
+    main.appendChild(regen);
+  }
+}
+
+// Close modal on click-outside
+document.getElementById('course-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeCourseModal();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeDrawer(); closeCourseModal(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') generatePlan();
+});
+
+// ── Prerequisite tree renderer ────────────────────────────────────────────
+
+function renderPrereqTree(node) {
+  if (!node) return '';
+  if (node.type === 'course') {
+    return `<a class="pnode-code" onclick="openDrawer('${node.code}');event.stopPropagation()">${node.code}</a>`;
+  }
+  if (node.type === 'and') {
+    const sep = `<span class="pnode-and"> AND </span>`;
+    const inner = node.children.map(renderPrereqTree).join(sep);
+    return node.children.length > 1 ? `(${inner})` : inner;
+  }
+  if (node.type === 'or') {
+    const sep = `<span class="pnode-or"> OR </span>`;
+    const inner = node.children.map(renderPrereqTree).join(sep);
+    return node.children.length > 1 ? `(${inner})` : inner;
+  }
+  return escHtml(String(node));
+}
+
+// ── Course explain panel ─────────────────────────────────────────────────
+
+async function loadExplain(code) {
+  // Use the current plan's major/campus/mode context if available
+  const major  = currentPlan ? currentPlan.request.major : (document.getElementById('major-input').value.trim());
+  const campus = currentPlan ? currentPlan.request.campus : document.getElementById('campus').value;
+  const mode   = currentPlan ? currentPlan.request.mode   : document.getElementById('mode').value;
+
+  const section = document.getElementById('explain-section');
+  if (!section) return;
+  if (!major) { toast('Generate a plan first, or enter a major name.'); return; }
+
+  section.innerHTML = `<div class="drawer-section" style="margin-top:1rem">
+    <h4>Scheduling constraints</h4>
+    <div style="color:var(--ink-faint);font-size:12px">Loading…</div>
+  </div>`;
+
+  try {
+    const params = new URLSearchParams({ major, campus, mode });
+    const data = await fetch(`${API}/courses/${code}/explain?${params}`).then(r => r.json());
+
+    let html = `<div class="drawer-section" style="margin-top:1rem">
+      <h4>Scheduling constraints</h4>
+      <ul style="margin-top:8px;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:7px">`;
+
+    data.constraints.forEach(c => {
+      // Icon heuristic: warnings start with "Not" or "no "
+      const isWarn = /^Not |^This course has no/i.test(c);
+      const icon = isWarn
+        ? `<span style="color:var(--warn,#c47d10);flex-shrink:0">⚠</span>`
+        : `<span style="color:var(--c0b,#2d8a6e);flex-shrink:0">✓</span>`;
+      html += `<li style="display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:1.5">
+        ${icon}<span>${escHtml(c)}</span></li>`;
+    });
+
+    html += `</ul>`;
+
+    if (data.offerings_all.length > 0 && data.offerings_matching.length === 0) {
+      const alts = [...new Set(data.offerings_all.map(o => `${o.campus}/${o.mode}`))].join(', ');
+      html += `<p style="margin-top:8px;font-size:11px;color:var(--ink-faint)">Available delivery modes: ${escHtml(alts)}</p>`;
+    }
+
+    html += `</div>`;
+    section.innerHTML = html;
+  } catch(e) {
+    section.innerHTML = '';
+  }
+}
+
+// ── Prerequisite chain viewer (SVG DAG) ──────────────────────────────────
+
+async function loadPrereqChain(code) {
+  const section = document.getElementById('prereq-chain-section');
+  if (!section) return;
+  section.innerHTML = `<div class="drawer-section" style="margin-top:1rem">
+    <h4>Prerequisite chain</h4>
+    <div style="color:var(--ink-faint);font-size:12px">Loading…</div>
+  </div>`;
+  try {
+    const data = await fetch(`${API}/courses/${code}/prereq-chain`).then(r => r.json());
+    if (!data.nodes || data.nodes.length <= 1) {
+      section.innerHTML = `<div class="drawer-section" style="margin-top:1rem">
+        <h4>Prerequisite chain</h4>
+        <div style="color:var(--ink-faint);font-size:12px">No prerequisite chain for this course.</div>
+      </div>`;
+      return;
+    }
+    const svg = buildPrereqSvg(data, code);
+    const maxDepth = data.chain_depth;
+    section.innerHTML = `<div class="drawer-section" style="margin-top:1rem">
+      <h4>Prerequisite chain <span style="font-weight:400;color:var(--ink-faint)">(${maxDepth} semester${maxDepth!==1?'s':''} deep)</span></h4>
+      <div style="margin-top:10px;overflow-x:auto;border-radius:8px;border:1px solid var(--border-md)">${svg}</div>
+      <p style="font-size:10px;color:var(--ink-faint);margin-top:6px">Click any course to open its details.</p>
+    </div>`;
+    // Wire up click handlers after inserting into DOM
+    section.querySelectorAll('[data-prereq-code]').forEach(el => {
+      el.addEventListener('click', e => {
+        openDrawer(el.dataset.prereqCode);
+        e.stopPropagation();
+      });
+    });
+  } catch(e) {
+    section.innerHTML = '';
+  }
+}
+
+function buildPrereqSvg(data, targetCode) {
+  // Layout constants
+  const NODE_W = 72, NODE_H = 26, COL_GAP = 54, ROW_GAP = 36;
+  const PAD_X = 16, PAD_Y = 20;
+
+  // Group nodes by depth column
+  const byDepth = {};
+  data.nodes.forEach(n => {
+    if (!byDepth[n.depth]) byDepth[n.depth] = [];
+    byDepth[n.depth].push(n);
+  });
+  const depths = Object.keys(byDepth).map(Number).sort((a,b)=>a-b);
+  const maxDepth = Math.max(...depths);
+
+  // Assign (col, row) positions
+  const pos = {};
+  depths.forEach(d => {
+    byDepth[d].forEach((n, i) => {
+      pos[n.code] = { col: d, row: i, total: byDepth[d].length };
+    });
+  });
+
+  // Canvas size
+  const cols = depths.length;
+  const maxRows = Math.max(...depths.map(d => byDepth[d].length));
+  const W = PAD_X * 2 + cols * NODE_W + (cols - 1) * COL_GAP;
+  const H = PAD_Y * 2 + maxRows * NODE_H + (maxRows - 1) * ROW_GAP;
+
+  function cx(code) {
+    const p = pos[code];
+    return PAD_X + p.col * (NODE_W + COL_GAP) + NODE_W / 2;
+  }
+  function cy(code) {
+    const p = pos[code];
+    const colH = p.total * NODE_H + (p.total - 1) * ROW_GAP;
+    const startY = PAD_Y + (H - PAD_Y*2 - colH) / 2;
+    return startY + p.row * (NODE_H + ROW_GAP) + NODE_H / 2;
+  }
+
+  // CSS variables – read at runtime via a small inline trick
+  // We use named CSS classes to inherit theme colours properly
+  let svgParts = [];
+
+  // Defs: arrowhead marker
+  svgParts.push(`<defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="var(--border-md,#ccc)"/>
+    </marker>
+    <marker id="arr-accent" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="var(--accent,#c84b31)"/>
+    </marker>
+  </defs>`);
+
+  // Edges first (so nodes render on top)
+  data.edges.forEach(e => {
+    if (!(e.from in pos) || !(e.to in pos)) return;
+    const x1 = cx(e.from) + NODE_W/2 - 1;
+    const y1 = cy(e.from);
+    const x2 = cx(e.to) - NODE_W/2 + 1;
+    const y2 = cy(e.to);
+    const isTarget = e.to === targetCode;
+    const mx = (x1 + x2) / 2;
+    svgParts.push(
+      `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"
+        fill="none"
+        stroke="${isTarget ? 'var(--accent,#c84b31)' : 'var(--border-md,#ccc)'}"
+        stroke-width="${isTarget ? 1.5 : 1}"
+        marker-end="${isTarget ? 'url(#arr-accent)' : 'url(#arr)'}"
+        opacity="${isTarget ? 1 : 0.6}"/>`
+    );
+  });
+
+  // Nodes
+  data.nodes.forEach(n => {
+    if (!(n.code in pos)) return;
+    const x = cx(n.code) - NODE_W/2;
+    const y = cy(n.code) - NODE_H/2;
+    const isSelf = n.code === targetCode;
+    const levelCls = n.level >= 300 ? 'dag-l3' : n.level >= 200 ? 'dag-l2' : 'dag-l1';
+    const fillCls = isSelf ? 'dag-self' : levelCls;
+    svgParts.push(
+      `<g class="dag-node ${fillCls}" data-prereq-code="${n.code}" style="cursor:pointer" role="button" tabindex="0">
+        <rect x="${x}" y="${y}" width="${NODE_W}" height="${NODE_H}" rx="5"/>
+        <text x="${cx(n.code)}" y="${cy(n.code) + 4}" text-anchor="middle"
+          font-family="var(--mono,'DM Mono',monospace)" font-size="11" font-weight="${isSelf?'600':'400'}">
+          ${n.code}
+        </text>
+        <title>${escHtml(n.title)} · ${n.credits}cr · Level ${n.level}</title>
+      </g>`
+    );
+  });
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}"
+    width="${W}" height="${H}" style="max-width:100%;display:block;background:var(--surface,#fff)">
+    <style>
+      .dag-node rect { stroke-width:1.5; }
+      .dag-l1 rect  { fill:var(--c0,#e8f4f0); stroke:var(--c0b,#2d8a6e); }
+      .dag-l1 text  { fill:var(--c0b,#2d8a6e); }
+      .dag-l2 rect  { fill:var(--c1,#f0eaf8); stroke:var(--c1b,#7c5cbf); }
+      .dag-l2 text  { fill:var(--c1b,#7c5cbf); }
+      .dag-l3 rect  { fill:var(--c3,#e6f0fa); stroke:var(--c3b,#2563a8); }
+      .dag-l3 text  { fill:var(--c3b,#2563a8); }
+      .dag-self rect { fill:var(--accent,#c84b31); stroke:var(--accent,#c84b31); }
+      .dag-self text { fill:#fff; }
+      .dag-node:hover rect { opacity:0.8; }
+      .dag-node:focus rect { outline:2px solid var(--accent,#c84b31); outline-offset:2px; }
+    </style>
+    ${svgParts.join('
+    ')}
+  </svg>`;
+}
+
+// ── Mobile sidebar ────────────────────────────────────────────────────────
+
+function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  const isOpen = sidebar.classList.contains('open');
+  if (isOpen) {
+    sidebar.classList.remove('open');
+    backdrop.classList.remove('open');
+  } else {
+    sidebar.classList.add('open');
+    backdrop.classList.add('open');
+  }
+}
+
+function closeSidebar() {
+  document.querySelector('.sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('open');
+}
+
+// ── Progress bar ──────────────────────────────────────────────────────────
+
+function renderProgressBar(main, meta) {
+  const target = meta.degree_target || 360;
+  const completed = meta.credits_prior + meta.credits_transfer;
+  const planned   = meta.credits_planned;
+  const total     = completed + planned;
+  const pctComp   = Math.min(100, Math.round((completed / target) * 100));
+  const pctPlan   = Math.min(100 - pctComp, Math.round((planned   / target) * 100));
+  const remaining = Math.max(0, target - total);
+
+  const el = document.createElement('div');
+  el.className = 'degree-progress-wrap';
+  el.innerHTML = `
+    <div class="degree-progress-label">
+      <span><strong>${total}cr</strong> of ${target}cr target</span>
+      <span>${remaining > 0 ? remaining + 'cr remaining' : '✓ degree complete'}</span>
+    </div>
+    <div class="degree-progress-track">
+      <div class="degree-progress-fill completed" style="width:${pctComp}%"></div>
+      <div class="degree-progress-fill planned"   style="width:${pctPlan}%"></div>
+    </div>
+    <div class="degree-progress-legend">
+      <span><span class="legend-dot" style="background:var(--accent)"></span>Prior/transfer (${completed}cr)</span>
+      <span><span class="legend-dot" style="background:var(--accent-md);opacity:0.7"></span>Planned (${planned}cr)</span>
+      ${remaining > 0 ? `<span><span class="legend-dot" style="background:var(--paper-3)"></span>Remaining (${remaining}cr)</span>` : ''}
+    </div>`;
+  main.appendChild(el);
+}
+
+// ── Validation panel ──────────────────────────────────────────────────────
+
+async function renderValidationPanel(main, req) {
+  const panel = document.createElement('div');
+  panel.className = 'validation-panel';
+  panel.innerHTML = `
+    <div class="validation-header" onclick="toggleValidation(this)">
+      <span class="validation-status" id="val-status">checking…</span>
+      <span style="font-size:13px;font-weight:500">Degree requirements</span>
+      <span style="margin-left:auto;font-size:11px;color:var(--ink-faint)" id="val-chevron">▼</span>
+    </div>
+    <div class="validation-body" id="val-body"></div>`;
+  main.appendChild(panel);
+
+  try {
+    const res = await fetch(`${API}/plan/validate`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(req),
+    });
+    const data = await res.json();
+    const status = document.getElementById('val-status');
+    const body   = document.getElementById('val-body');
+    if (data.passed) {
+      status.textContent = '✓ all requirements met';
+      status.className = 'validation-status pass';
+    } else {
+      status.textContent = `✗ ${data.errors.length} issue${data.errors.length!==1?'s':''}`;
+      status.className = 'validation-status fail';
+    }
+    body.innerHTML = renderChecklist(data.checklist);
+    // Auto-open if there are failures
+    if (!data.passed) {
+      body.classList.add('open');
+      document.getElementById('val-chevron').textContent = '▲';
+    }
+  } catch(e) {
+    const status = document.getElementById('val-status');
+    if (status) status.textContent = 'unavailable';
+  }
+}
+
+function toggleValidation(header) {
+  const body = document.getElementById('val-body');
+  const chevron = document.getElementById('val-chevron');
+  body.classList.toggle('open');
+  chevron.textContent = body.classList.contains('open') ? '▲' : '▼';
+}
+
+function renderChecklist(node, depth=0) {
+  if (!node) return '';
+  const icon = node.passed
+    ? `<span class="check-icon check-pass">✓</span>`
+    : `<span class="check-icon check-fail">✗</span>`;
+
+  if (node.type === 'all_of' || node.type === 'any_of') {
+    const children = (node.children || []).map(c => renderChecklist(c, depth+1)).join('');
+    if (depth === 0 && node.children?.length === 1) {
+      // Unwrap single-child root node to avoid redundant nesting
+      return children;
+    }
+    return `<div class="checklist-item" style="${depth>0?'padding-left:'+(depth*14)+'px':''}">
+      ${icon}<span class="check-label">${escHtml(node.label)}</span>
+    </div>
+    <div class="check-children">${children}</div>`;
+  }
+
+  // Failed pool: show pick-list of available courses
+  if ((node.type === 'choose_credits' || node.type === 'choose_n') && !node.passed && node.pool_codes?.length) {
+    const uid = 'pool-' + Math.random().toString(36).slice(2,7);
+    const pills = node.pool_codes.map(code =>
+      `<span class="pnode-code" style="cursor:pointer;font-size:10px" onclick="openDrawer('${code}')">${code}</span>`
+    ).join('');
+    return `<div class="checklist-item" style="${depth>0?'padding-left:'+(depth*14)+'px':''}">
+      ${icon}
+      <span class="check-label" style="flex:1">
+        ${escHtml(node.label)}
+        <div style="margin-top:6px">
+          <button style="font-size:10px;font-family:var(--mono);background:none;border:none;color:var(--accent);cursor:pointer;padding:0" onclick="document.getElementById('${uid}').style.display=document.getElementById('${uid}').style.display==='none'?'flex':'none'">
+            ▸ Pick from ${node.pool_codes.length} courses
+          </button>
+          <div id="${uid}" style="display:none;flex-wrap:wrap;gap:4px;margin-top:6px">${pills}</div>
+        </div>
+      </span>
+    </div>`;
+  }
+
+  // Passed pool: compact summary
+  if ((node.type === 'choose_credits' || node.type === 'choose_n') && node.passed) {
+    return `<div class="checklist-item" style="${depth>0?'padding-left:'+(depth*14)+'px':''}">
+      ${icon}<span class="check-label">${escHtml(node.label)}</span>
+    </div>`;
+  }
+
+  return `<div class="checklist-item" style="${depth>0?'padding-left:'+(depth*14)+'px':''}">
+    ${icon}
+    <span class="check-label">
+      ${node.type === 'course'
+        ? `<a style="cursor:pointer;color:var(--accent);font-family:var(--mono);font-size:11px" onclick="openDrawer('${escHtml(node.code)}')">${escHtml(node.code)}</a> ${escHtml(node.title||'')}`
+        : escHtml(node.label)}
+    </span>
+  </div>`;
+}
+
+// ── Year grouping ─────────────────────────────────────────────────────────
+
+function groupSemestersByYear(semesters) {
+  const groups = {};
+  semesters.forEach(sem => {
+    if (!groups[sem.year]) groups[sem.year] = [];
+    groups[sem.year].push(sem);
+  });
+  return groups;
+}
+
+// ── Mark as completed ─────────────────────────────────────────────────────
+
+function markCompleted(code) {
+  addTag('completed-wrap', code);
+  toast(`${code} marked as completed — regenerate to update plan`);
+  // If we have a current plan, offer to regenerate
+  const main = document.getElementById('main');
+  let regen = document.getElementById('regen-banner');
+  if (!regen) {
+    regen = document.createElement('div');
+    regen.id = 'regen-banner';
+    regen.className = 'warning-banner';
+    regen.style.cssText = 'position:sticky;bottom:0;z-index:50;cursor:pointer;justify-content:space-between';
+    regen.innerHTML = `<span>⟳ Completed courses updated</span><button class="btn-secondary" style="padding:4px 12px;font-size:12px" onclick="generatePlan();document.getElementById('regen-banner')?.remove()">Regenerate plan</button>`;
+    main.appendChild(regen);
+  }
+}
+
+// ── Course search modal ───────────────────────────────────────────────────
+
+let modalCourseCache = null;
+let modalLevel = '';
+let modalDebounce = null;
+
+async function openCourseModal() {
+  document.getElementById('course-modal').classList.add('open');
+  document.getElementById('modal-search').focus();
+  if (!modalCourseCache) {
+    document.getElementById('modal-count').textContent = 'Loading catalogue…';
+    document.getElementById('modal-results').innerHTML = '<div class="modal-empty">Loading…</div>';
+    // Load a broad set of courses
+    const campus = currentPlan?.request?.campus || document.getElementById('campus').value || 'D';
+    const mode   = currentPlan?.request?.mode   || document.getElementById('mode').value   || 'DIS';
+    const res = await fetch(`${API}/courses?limit=500&campus=${campus}&mode=${mode}`).then(r => r.json());
+    modalCourseCache = res.courses;
+  }
+  renderModalResults(document.getElementById('modal-search').value);
+}
+
+function closeCourseModal() {
+  document.getElementById('course-modal').classList.remove('open');
+}
+
+function setModalLevel(el, level) {
+  modalLevel = level;
+  document.querySelectorAll('#modal-filters .filter-pill').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  renderModalResults(document.getElementById('modal-search').value);
+}
+
+function modalSearch(val) {
+  clearTimeout(modalDebounce);
+  modalDebounce = setTimeout(() => renderModalResults(val), 180);
+}
+
+function renderModalResults(query) {
+  if (!modalCourseCache) return;
+  const results = document.getElementById('modal-results');
+  const countEl = document.getElementById('modal-count');
+  const plannedCodes = currentPlan
+    ? new Set(currentPlan.response.semesters.flatMap(s => s.courses.map(c => c.code)))
+    : new Set();
+
+  let courses = modalCourseCache;
+  if (modalLevel) courses = courses.filter(c => c.level === parseInt(modalLevel));
+  if (query.trim()) {
+    const words = query.trim().toLowerCase().split(/\s+/);
+    courses = courses.filter(c =>
+      words.every(w => c.code.toLowerCase().includes(w) || c.title.toLowerCase().includes(w))
+    );
+  }
+
+  countEl.textContent = `${courses.length} course${courses.length !== 1 ? 's' : ''}`;
+
+  if (!courses.length) {
+    results.innerHTML = '<div class="modal-empty">No courses match your search.</div>';
+    return;
+  }
+
+  const campus = currentPlan?.request?.campus || 'D';
+  const mode   = currentPlan?.request?.mode   || 'DIS';
+
+  results.innerHTML = courses.slice(0, 100).map(c => {
+    const inPlan = plannedCodes.has(c.code);
+    const sems = c.offerings
+      .filter(o => o.campus === campus && o.mode === mode)
+      .map(o => o.semester);
+    const semStr = [...new Set(sems)].join('/') || '—';
+    return `<div class="modal-course-row${inPlan?' style=\"background:var(--accent-lt)\"':''}" onclick="openDrawer('${c.code}');closeCourseModal()">
+      <span class="modal-course-code">${c.code}${inPlan?' ✓':''}</span>
+      <span class="modal-course-title">${escHtml(c.title)}</span>
+      <span class="modal-course-cr">${c.credits}cr</span>
+      <span class="modal-course-sem">L${c.level} · ${semStr}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── HTML export ───────────────────────────────────────────────────────────
+
+function downloadHtml() {
+  if (!currentPlan) { toast('Generate a plan first.'); return; }
+  const data = currentPlan.response;
+  const meta = data.meta;
+  const sems = data.semesters;
+  const cov  = meta.prereq_coverage || {};
+  const doubleMajorInfo = data.double_major_info;
+
+  const semAccents = [
+    {bg:'#e8f4f0',text:'#1e6e54',border:'#b8ddd4'},
+    {bg:'#ede8f6',text:'#5b3fa8',border:'#cdc2e8'},
+    {bg:'#fef3e2',text:'#a06010',border:'#f0d090'},
+    {bg:'#e4eef8',text:'#1a4f8c',border:'#a8c8ec'},
+    {bg:'#fde8ec',text:'#a02030',border:'#f0b0b8'},
+    {bg:'#e8f0e4',text:'#2a6020',border:'#b0d0a8'},
+  ];
+
+  // Build per-semester blocks with full course info
+  const semsHtml = sems.map((sem, i) => {
+    const ac = semAccents[i % semAccents.length];
+    const isDouble = doubleMajorInfo != null;
+    const firstCodes  = new Set(doubleMajorInfo?.first_codes  || []);
+    const secondCodes = new Set(doubleMajorInfo?.second_codes || []);
+    const sharedCodes = new Set(doubleMajorInfo?.shared_codes || []);
+
+    const rows = sem.courses.map(c => {
+      let badge = '';
+      if (isDouble) {
+        if (sharedCodes.has(c.code)) badge = '<span style="background:#e8f4f0;color:#1e6e54;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:6px;font-family:monospace">SHARED</span>';
+        else if (secondCodes.has(c.code)) badge = '<span style="background:#ede8f6;color:#5b3fa8;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:6px;font-family:monospace">2ND</span>';
+      }
+      const noData = c.prereq_data_available === false && c.level >= 200
+        ? '<span title="No prerequisite data — verify manually" style="color:#c47d10;font-size:10px;margin-left:4px">⚠</span>'
+        : '';
+      const prereqText = c.prerequisites_human
+        ? `<div style="font-size:11px;color:#888;margin-top:2px">Prereqs: ${c.prerequisites_human}</div>`
+        : '';
+      return `<tr style="border-top:1px solid #f0ede8">
+        <td style="padding:8px 12px;vertical-align:top;width:76px">
+          <span style="font-family:monospace;font-size:12px;color:#666">${c.code}</span>
+          ${noData}
+        </td>
+        <td style="padding:8px 12px 8px 0;vertical-align:top">
+          <div style="font-size:13px;font-weight:500;color:#1a1a18">${c.title}${badge}</div>
+          ${prereqText}
+        </td>
+        <td style="padding:8px 12px;text-align:right;vertical-align:top;white-space:nowrap;width:52px">
+          <span style="font-family:monospace;font-size:11px;color:#999">${c.credits}cr</span>
+        </td>
+      </tr>`;
+    }).join('');
+
+    return `<div style="border:1px solid ${ac.border};border-radius:10px;overflow:hidden;margin-bottom:14px;page-break-inside:avoid">
+      <div style="background:${ac.bg};color:${ac.text};padding:9px 14px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:monospace;font-size:13px;font-weight:700">${sem.year} ${sem.semester}</span>
+        <span style="font-family:monospace;font-size:12px;opacity:0.8">${sem.credits}cr · ${sem.courses.length} course${sem.courses.length !== 1 ? 's' : ''}</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;background:#fff">
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  }).join('');
+
+  const totalCr  = meta.credits_planned + meta.credits_prior + meta.credits_transfer;
+  const gap      = meta.free_elective_gap || 0;
+  const genDate  = new Date().toLocaleDateString('en-NZ',{year:'numeric',month:'long',day:'numeric'});
+  const planTitle = doubleMajorInfo
+    ? `${meta.major} + ${doubleMajorInfo.second_label}`
+    : meta.major;
+
+  // Double major legend
+  const legendHtml = doubleMajorInfo ? `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:1.5rem;font-size:12px">
+      <span style="display:flex;align-items:center;gap:6px">
+        <span style="background:#e8f4f0;color:#1e6e54;font-family:monospace;font-size:10px;padding:2px 7px;border-radius:4px">SHARED</span>
+        Both majors
+      </span>
+      <span style="display:flex;align-items:center;gap:6px">
+        <span style="background:#ede8f6;color:#5b3fa8;font-family:monospace;font-size:10px;padding:2px 7px;border-radius:4px">2ND</span>
+        ${doubleMajorInfo.second_label} only
+      </span>
+      <span style="color:#666">Unmarked = ${doubleMajorInfo.first_label} only</span>
+    </div>` : '';
+
+  // Prereq coverage caveat
+  const covPct = cov.coverage_pct ?? 100;
+  const covNote = covPct < 95 ? `
+    <div style="background:#fef3e8;border:1px solid #f4c07a;border-radius:8px;padding:12px 16px;margin-bottom:1.5rem;font-size:12px;color:#8a4a0a">
+      <strong>⚠ Prerequisite data incomplete (${covPct}% coverage).</strong>
+      ${cov.total_courses - cov.courses_with_data} course(s) may have unverified prerequisites —
+      those marked ⚠ above should be checked on <a href="https://www.massey.ac.nz" style="color:#8a4a0a">massey.ac.nz</a> before enrolling.
+    </div>` : '';
+
+  const priorBlock = meta.credits_prior > 0
+    ? `<div class="stat"><div class="v">${meta.credits_prior}cr</div><div class="l">Prior credit</div></div>` : '';
+  const transferBlock = meta.credits_transfer > 0
+    ? `<div class="stat"><div class="v">${meta.credits_transfer}cr</div><div class="l">Transfer credit</div></div>` : '';
+  const gapBlock = gap > 0
+    ? `<div class="stat"><div class="v" style="color:#c47d10">${gap}cr</div><div class="l">Elective gap</div></div>` : '';
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${planTitle} — Degree Plan</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,'Helvetica Neue',Arial,sans-serif;background:#f7f6f0;color:#1a1a18;padding:2.5rem 2rem;min-height:100vh}
+  .wrap{max-width:800px;margin:0 auto}
+  header{border-bottom:3px solid #1a1a18;padding-bottom:1.5rem;margin-bottom:2rem}
+  .eyebrow{font-family:monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.18em;color:#9a9a94;margin-bottom:8px}
+  h1{font-size:clamp(1.25rem,3vw,1.85rem);font-weight:800;line-height:1.2;margin-bottom:10px;letter-spacing:-0.02em}
+  .meta-row{display:flex;gap:1.5rem;flex-wrap:wrap;font-family:monospace;font-size:11px;color:#9a9a94}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:1px;background:#e0ddd7;border:1px solid #e0ddd7;border-radius:10px;overflow:hidden;margin-bottom:2rem}
+  .stat{background:#fff;padding:14px 18px}
+  .stat .v{font-size:1.6rem;font-weight:800;font-family:monospace;line-height:1;letter-spacing:-0.02em}
+  .stat .l{font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:#9a9a94;margin-top:5px}
+  footer{border-top:1px solid #e0ddd7;padding-top:1rem;font-size:10.5px;color:#9a9a94;font-family:monospace;margin-top:2.5rem;line-height:1.6}
+  @media print{
+    body{background:#fff;padding:1.5cm 1.5cm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .wrap{max-width:none}
+    header{border-bottom-width:2px}
+    .no-print{display:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Massey University &nbsp;·&nbsp; coursemap</div>
+    <h1>${planTitle}</h1>
+    <div class="meta-row">
+      <span>Starting ${meta.start_year} ${meta.start_semester || 'S1'}</span>
+      <span>${meta.campus}/${meta.mode}</span>
+      <span>${sems.length} semester${sems.length !== 1 ? 's' : ''}</span>
+      <span>Generated ${genDate}</span>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="v">${totalCr}cr</div><div class="l">Credits total</div></div>
+    <div class="stat"><div class="v">${meta.degree_target}cr</div><div class="l">Degree target</div></div>
+    ${priorBlock}${transferBlock}${gapBlock}
+  </div>
+
+  ${covNote}
+  ${legendHtml}
+
+  ${gap > 0 ? `<div style="background:#fef3e8;border:1px solid #f4c07a;border-radius:8px;padding:12px 16px;margin-bottom:1.5rem;font-size:13px;color:#8a4a0a">
+    ⚠ <strong>${gap}cr elective gap</strong> — select free electives from Massey's course catalogue to fill this gap before enrolling.
+  </div>` : ''}
+
+  ${semsHtml}
+
+  <footer>
+    Generated by coursemap on ${genDate}<br>
+    This plan is for planning purposes only. Verify all requirements with Massey University and your academic adviser before enrolling.<br>
+    massey.ac.nz · coursemap is not affiliated with Massey University
+  </footer>
+</div>
+</body>
+</html>`;
+
+  const blob = new Blob([html], {type:'text/html'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `degree_plan_${(planTitle).replace(/[^a-zA-Z0-9]+/g,'_').slice(0,50)}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('HTML plan downloaded — open in any browser to view or print.');
+}
+
+
+// ── Prerequisite coverage warning ────────────────────────────────────────
+function renderPrereqCoverageWarning(data) {
+  // Remove any existing coverage banner
+  document.getElementById('prereq-coverage-banner')?.remove();
+
+  const cov = data?.meta?.prereq_coverage;
+  if (!cov) return;
+
+  const { coverage_pct, missing_data_codes, total_courses, courses_with_data } = cov;
+
+  // Only show if coverage is meaningfully incomplete (< 95%)
+  if (coverage_pct >= 95) return;
+
+  const missing = missing_data_codes || [];
+  const unknownCount = total_courses - courses_with_data;
+
+  const banner = document.createElement('div');
+  banner.id = 'prereq-coverage-banner';
+  banner.style.cssText = `
+    background: var(--warn-lt);
+    border: 1px solid rgba(138,74,10,0.25);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--warn);
+    margin-bottom: 0;
+  `;
+
+  const codeLinks = missing.slice(0, 12).map(code => {
+    const url = `https://www.massey.ac.nz/study/all-qualifications-and-degrees/search-for-a-paper/?SearchType=all&SearchText=${code}`;
+    return `<a href="${url}" target="_blank" rel="noopener"
+      style="color:var(--warn);font-family:var(--mono);font-size:11.5px;
+             text-decoration:underline;text-underline-offset:2px">${code}</a>`;
+  }).join(' ');
+
+  const extra = missing.length > 12 ? `<span style="color:var(--ink-faint);font-size:11px"> +${missing.length - 12} more</span>` : '';
+
+  banner.innerHTML = `
+    <div style="display:flex;gap:8px;align-items:flex-start">
+      <span style="flex-shrink:0;font-size:16px">⚠</span>
+      <div style="flex:1;min-width:0">
+        <strong>Prerequisite data incomplete</strong> —
+        ${unknownCount} of ${total_courses} scheduled course${unknownCount !== 1 ? 's' : ''}
+        (${100 - coverage_pct}%) ${unknownCount !== 1 ? 'have' : 'has'} no scraped prerequisite data.
+        The planner may have scheduled these without knowing their real prerequisites.
+        <details style="margin-top:6px">
+          <summary style="cursor:pointer;font-size:12px;color:var(--warn);user-select:none">
+            ▸ Verify these courses on Massey's site
+          </summary>
+          <div style="margin-top:6px;line-height:2">
+            ${codeLinks}${extra}
+          </div>
+          <div style="margin-top:4px;font-size:11px;color:var(--ink-mid)">
+            Click a code to search for it on massey.ac.nz and confirm prerequisites manually.
+          </div>
+        </details>
+      </div>
+      <button onclick="this.closest('#prereq-coverage-banner').remove()"
+        style="background:none;border:none;cursor:pointer;color:var(--warn);font-size:16px;
+               padding:0;flex-shrink:0;line-height:1;opacity:0.6" title="Dismiss">✕</button>
+    </div>`;
+
+  // Insert after the stats grid (after the first stat-card section)
+  const main = document.getElementById('main');
+  const statsGrid = main?.querySelector('.summary-grid');
+  if (statsGrid?.nextSibling) {
+    statsGrid.parentNode.insertBefore(banner, statsGrid.nextSibling);
+  } else if (main) {
+    main.appendChild(banner);
+  }
+}
+
+// ── Saved Plans (localStorage) ────────────────────────────────────────────
+const SAVED_PLANS_KEY = 'coursemap:saved_plans';
+
+function _loadSavedPlans() {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED_PLANS_KEY) || '[]');
+  } catch { return []; }
+}
+
+function _persistSavedPlans(plans) {
+  localStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(plans));
+}
+
+let _activeSavedPlanId = null;
+
+function renderSavedPlansList() {
+  const list = document.getElementById('saved-plans-list');
+  if (!list) return;
+  const plans = _loadSavedPlans();
+  if (plans.length === 0) {
+    list.innerHTML = '<div class="empty-saved">No saved plans yet.</div>';
+    return;
+  }
+  list.innerHTML = plans.map(p => {
+    const isActive = p.id === _activeSavedPlanId;
+    const date = new Date(p.savedAt).toLocaleDateString('en-NZ', { day:'numeric', month:'short' });
+    const sems = p.plan?.semesters?.length ?? '?';
+    const credits = p.plan?.total_credits ?? '?';
+    return `
+      <div class="saved-plan-item${isActive ? ' active' : ''}"
+           onclick="loadSavedPlan('${p.id}')"
+           title="${escHtml(p.name)} · Saved ${date}">
+        <span class="saved-plan-name">${escHtml(p.name)}</span>
+        <span class="plan-meta">${sems}sem·${credits}cr</span>
+        <span class="saved-plan-actions">
+          <button class="saved-plan-btn" title="Rename"
+                  onclick="event.stopPropagation();renameSavedPlan('${p.id}')">✎</button>
+          <button class="saved-plan-btn" title="Delete"
+                  onclick="event.stopPropagation();deleteSavedPlan('${p.id}')">✕</button>
+        </span>
+      </div>`;
+  }).join('');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function promptSavePlan() {
+  const row = document.getElementById('save-input-row');
+  const btn = document.getElementById('btn-save-plan');
+  const inp = document.getElementById('save-plan-name');
+  if (!row || !btn || !inp) return;
+  // Pre-fill with major name if available
+  const majorSel = document.getElementById('sel-major');
+  inp.value = majorSel?.options[majorSel.selectedIndex]?.text?.replace(' – Bachelor of Science','')?.trim() ?? '';
+  row.style.display = 'flex';
+  btn.style.display = 'none';
+  inp.focus();
+  inp.select();
+}
+
+function cancelSavePlan() {
+  document.getElementById('save-input-row').style.display = 'none';
+  document.getElementById('btn-save-plan').style.display = '';
+}
+
+function commitSavePlan() {
+  const inp = document.getElementById('save-plan-name');
+  const name = inp?.value?.trim();
+  if (!name) { inp?.focus(); return; }
+  if (!window._lastPlanData) { cancelSavePlan(); return; }
+
+  const plans = _loadSavedPlans();
+  // If overwriting active plan ask confirmation
+  if (_activeSavedPlanId) {
+    const existing = plans.find(p => p.id === _activeSavedPlanId);
+    if (existing && existing.name === name) {
+      existing.plan = window._lastPlanData;
+      existing.savedAt = Date.now();
+      existing.params = _currentParams();
+      _persistSavedPlans(plans);
+      cancelSavePlan();
+      renderSavedPlansList();
+      flashToast('Plan updated ✓');
+      return;
+    }
+  }
+  const id = 'p_' + Date.now().toString(36);
+  plans.unshift({ id, name, plan: window._lastPlanData, params: _currentParams(), savedAt: Date.now() });
+  // Cap at 20 saved plans
+  if (plans.length > 20) plans.splice(20);
+  _persistSavedPlans(plans);
+  _activeSavedPlanId = id;
+  cancelSavePlan();
+  renderSavedPlansList();
+  flashToast('Plan saved ✓');
+}
+
+function loadSavedPlan(id) {
+  const plans = _loadSavedPlans();
+  const entry = plans.find(p => p.id === id);
+  if (!entry) return;
+  _activeSavedPlanId = id;
+  window._lastPlanData = entry.plan;
+  // Restore form params if available
+  if (entry.params) _restoreParams(entry.params);
+  renderPlan(entry.plan);
+  renderSavedPlansList();
+  // Enable share/save buttons
+  document.getElementById('btn-share')?.removeAttribute('disabled');
+  document.getElementById('btn-save-plan')?.removeAttribute('disabled');
+}
+
+function deleteSavedPlan(id) {
+  let plans = _loadSavedPlans();
+  const entry = plans.find(p => p.id === id);
+  if (!entry) return;
+  if (!confirm(`Delete saved plan "${entry.name}"?`)) return;
+  plans = plans.filter(p => p.id !== id);
+  _persistSavedPlans(plans);
+  if (_activeSavedPlanId === id) _activeSavedPlanId = null;
+  renderSavedPlansList();
+}
+
+function renameSavedPlan(id) {
+  const plans = _loadSavedPlans();
+  const entry = plans.find(p => p.id === id);
+  if (!entry) return;
+  const newName = prompt('Rename plan:', entry.name)?.trim();
+  if (!newName) return;
+  entry.name = newName.slice(0, 48);
+  _persistSavedPlans(plans);
+  renderSavedPlansList();
+}
+
+function _currentParams() {
+  // Capture sidebar form state using the actual element IDs from the HTML
+  const get = id => document.getElementById(id);
+  return {
+    major:          get('major-input')?.value,
+    doubleMajor:    get('double-major-input')?.value,
+    campus:         get('campus')?.value,
+    mode:           get('mode')?.value,
+    startYear:      get('start-year')?.value,
+    startSemester:  get('start-semester')?.value,
+    maxCredits:     get('max-credits')?.value,
+    maxPerSem:      get('max-per-sem')?.value,
+    noSummer:       get('no-summer')?.checked,
+    autoFill:       get('auto-fill')?.checked,
+    completed:      getTags('completed-wrap').join(', '),
+    preferred:      getTags('prefer-wrap').join(', '),
+    excluded:       getTags('exclude-wrap').join(', '),
+    transferCredits: get('transfer')?.value,
+  };
+}
+
+function _restoreParams(p) {
+  const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+  const setChk = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.checked = val; };
+  if (p.major != null) {
+    set('major-input', p.major);
+    // Trigger autocomplete resolution so the hidden major value is set too
+    const evt = new Event('input', { bubbles: true });
+    document.getElementById('major-input')?.dispatchEvent(evt);
+  }
+  if (p.doubleMajor != null) set('double-major-input', p.doubleMajor);
+  set('campus', p.campus);
+  set('mode', p.mode);
+  set('start-year', p.startYear);
+  set('start-semester', p.startSemester);
+  set('max-credits', p.maxCredits);
+  set('max-per-sem', p.maxPerSem);
+  set('transfer', p.transferCredits);
+  setChk('no-summer', p.noSummer);
+  setChk('auto-fill', p.autoFill);
+  // Restore tag inputs by setting their text values (tags will need manual re-adding,
+  // but this pre-fills the input as a convenience)
+  if (p.completed) { const el = document.getElementById('completed-input'); if (el) el.value = p.completed; }
+  if (p.preferred) { const el = document.getElementById('prefer-input'); if (el) el.value = p.preferred; }
+  if (p.excluded)  { const el = document.getElementById('exclude-input');  if (el) el.value = p.excluded; }
+}
+
+function flashToast(msg, duration=2200) {
+  let toast = document.getElementById('_toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = '_toast';
+    toast.style.cssText = `position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(8px);
+      background:var(--ink);color:var(--paper);padding:8px 18px;border-radius:20px;font-size:13px;
+      opacity:0;transition:opacity 0.18s,transform 0.18s;z-index:9999;pointer-events:none;white-space:nowrap`;
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  toast.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(-50%) translateY(8px)';
+  }, duration);
+}
+
+
+init();
+renderSavedPlansList();
+</script>
+</body>
+</html>
