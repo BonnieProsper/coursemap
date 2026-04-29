@@ -4,8 +4,6 @@ Work on arbitrarily nested requirement trees. Used for enumeration (e.g. solver)
 """
 from __future__ import annotations
 
-from typing import List, Set
-
 from .requirement_nodes import (
     AllOfRequirement,
     AnyOfRequirement,
@@ -19,9 +17,9 @@ from .requirement_nodes import (
 )
 
 
-def collect_course_codes(node: RequirementNode) -> Set[str]:
+def collect_course_codes(node: RequirementNode) -> set[str]:
     """Recursively collect all course codes mentioned anywhere in the tree."""
-    out: Set[str] = set()
+    out: set[str] = set()
     if isinstance(node, CourseRequirement):
         out.add(node.course_code)
     elif isinstance(node, (AllOfRequirement, AnyOfRequirement)):
@@ -39,9 +37,9 @@ def collect_course_codes(node: RequirementNode) -> Set[str]:
 
 def collect_elective_nodes(
     node: RequirementNode,
-) -> List[ChooseCreditsRequirement | ChooseNRequirement]:
+) -> list[ChooseCreditsRequirement | ChooseNRequirement]:
     """Recursively collect all CHOOSE_CREDITS and CHOOSE_N nodes at any depth."""
-    out: List[ChooseCreditsRequirement | ChooseNRequirement] = []
+    out: list[ChooseCreditsRequirement | ChooseNRequirement] = []
     if isinstance(node, (ChooseCreditsRequirement, ChooseNRequirement)):
         out.append(node)
     if isinstance(node, (AllOfRequirement, AnyOfRequirement)):
@@ -52,9 +50,39 @@ def collect_elective_nodes(
     return out
 
 
-def collect_major_nodes(node: RequirementNode) -> List[MajorRequirement]:
+def collect_degree_elective_nodes(
+    node: RequirementNode,
+    *,
+    under_major: bool = False,
+) -> list[ChooseCreditsRequirement | ChooseNRequirement]:
+    """
+    Collect CHOOSE_CREDITS and CHOOSE_N nodes that are NOT inside any MAJOR subtree.
+
+    Used by the solver to find degree-level elective pools: pools that are
+    requirements of the degree itself rather than of a particular major.
+    Major-level pools are handled separately via collect_elective_nodes on each
+    major's own requirement tree.
+
+    This mirrors collect_core_course_codes: recursion stops at MajorRequirement
+    boundaries so that the two sources of pools are never double-counted.
+    """
+    out: list[ChooseCreditsRequirement | ChooseNRequirement] = []
+    if isinstance(node, (ChooseCreditsRequirement, ChooseNRequirement)):
+        if not under_major:
+            out.append(node)
+    if isinstance(node, (AllOfRequirement, AnyOfRequirement)):
+        for c in node.children:
+            out.extend(collect_degree_elective_nodes(c, under_major=under_major))
+    elif isinstance(node, MajorRequirement):
+        # Stop here. Major-level pools are collected separately via
+        # collect_elective_nodes(major_req) to avoid double-counting.
+        return out
+    return out
+
+
+def collect_major_nodes(node: RequirementNode) -> list[MajorRequirement]:
     """Recursively collect all MAJOR nodes at any depth."""
-    out: List[MajorRequirement] = []
+    out: list[MajorRequirement] = []
     if isinstance(node, MajorRequirement):
         out.append(node)
         out.extend(collect_major_nodes(node.requirement))
@@ -78,12 +106,12 @@ def find_total_credits(node: RequirementNode) -> int:
     return 0
 
 
-def collect_core_course_codes(node: RequirementNode, *, under_major: bool = False) -> Set[str]:
+def collect_core_course_codes(node: RequirementNode, *, under_major: bool = False) -> set[str]:
     """
     Collect course codes from COURSE nodes that are not inside a major.
     Used for degree-level required (core) courses; does not include codes from CHOOSE_* nodes.
     """
-    out: Set[str] = set()
+    out: set[str] = set()
     if isinstance(node, CourseRequirement):
         if not under_major:
             out.add(node.course_code)
@@ -93,3 +121,80 @@ def collect_core_course_codes(node: RequirementNode, *, under_major: bool = Fals
     elif isinstance(node, MajorRequirement):
         out |= collect_core_course_codes(node.requirement, under_major=True)
     return out
+
+
+def select_free_electives(
+    courses: dict,
+    planned_codes: set,
+    excluded_codes: set,
+    gap: int,
+    campus: str,
+    mode: str,
+    preferred: frozenset | None = None,
+    max_level_override: int | None = None,
+) -> list[tuple[int, str, str]]:
+    """
+    Select subject-area elective courses to fill a free-elective credit gap.
+
+    Returns a list of (level, code, title) tuples ordered by relevance:
+    dominant-prefix courses first, then secondary subjects, then by level
+    and code. Suitable both for display (CLI suggestions) and for use as
+    filler in auto-fill planning.
+
+    Args:
+        courses:            Full course catalogue (code -> Course).
+        planned_codes:      Codes already in the plan (excluded from selection).
+        excluded_codes:     Additional codes to exclude (--exclude flag + prior).
+        gap:                Free-elective credit gap to fill.
+        campus:             Campus filter (e.g. 'D').
+        mode:               Delivery mode filter (e.g. 'DIS').
+        preferred:          Course codes to prioritise (--prefer flag).
+        max_level_override: Override the auto-detected maximum level cap.
+    """
+    from collections import Counter
+
+    if gap <= 0:
+        return []
+
+    if preferred is None:
+        preferred = frozenset()
+
+    all_excluded = set(planned_codes) | set(excluded_codes)
+    prefix_counts = Counter(code[:3] for code in planned_codes)
+    prefix_rank   = {pfx: rank for rank, (pfx, _) in enumerate(prefix_counts.most_common())}
+
+    max_planned_level = max_level_override or max(
+        (courses[c].level for c in planned_codes if c in courses),
+        default=100,
+    )
+
+    candidates: list[tuple] = []
+    seen: set = set()
+
+    for code, course in courses.items():
+        if code in all_excluded or code in seen:
+            continue
+        if not any(o.campus == campus and o.mode == mode for o in course.offerings):
+            continue
+        if course.level > 300 or course.level > max_planned_level + 100:
+            continue
+        pfx = code[:3]
+        if pfx in prefix_rank:
+            prefer_flag = 0 if code in preferred else 1
+            candidates.append((prefer_flag, prefix_rank[pfx], course.level, code, course.title))
+            seen.add(code)
+
+    candidates.sort()
+
+    selected: list[tuple[int, str, str]] = []
+    running = 0
+    for _, _, level, code, title in candidates:
+        cr = courses[code].credits
+        if running + cr > gap + 30:
+            continue
+        selected.append((level, code, title))
+        running += cr
+        if running >= gap:
+            break
+
+    return selected

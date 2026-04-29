@@ -4,8 +4,6 @@ Dataset format: each node is a dict with "type" and type-specific fields.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Set
-
 from .requirement_nodes import (
     AllOfRequirement,
     AnyOfRequirement,
@@ -19,9 +17,10 @@ from .requirement_nodes import (
     RequirementNode,
     TotalCreditsRequirement,
 )
+from .requirement_utils import collect_course_codes
 
 
-def requirement_to_dict(node: RequirementNode) -> Dict[str, Any]:
+def requirement_to_dict(node: RequirementNode) -> dict:
     """Convert a RequirementNode to a JSON-serializable dict."""
     if isinstance(node, CourseRequirement):
         return {"type": "COURSE", "course_code": node.course_code}
@@ -77,13 +76,21 @@ def requirement_to_dict(node: RequirementNode) -> Dict[str, Any]:
     raise ValueError(f"Unknown requirement node type: {type(node)}")
 
 
-def requirement_from_dict(data: Dict[str, Any]) -> RequirementNode:
+def _sanitize_code(raw: str) -> str:
+    """Strip the 'Course code:' prefix that the scraper sometimes produces."""
+    s = raw.strip()
+    if s.lower().startswith("course code:"):
+        return s[len("course code:"):].strip()
+    return s
+
+
+def requirement_from_dict(data: dict) -> RequirementNode:
     """Parse a dict (e.g. from JSON) into a RequirementNode."""
     if not isinstance(data, dict) or "type" not in data:
         raise ValueError("Requirement dict must have 'type' key")
     typ = data["type"]
     if typ == "COURSE":
-        return CourseRequirement(course_code=data["course_code"])
+        return CourseRequirement(course_code=_sanitize_code(data["course_code"]))
     if typ == "ALL_OF":
         children = [requirement_from_dict(c) for c in data["children"]]
         return AllOfRequirement(children=tuple(children))
@@ -93,12 +100,12 @@ def requirement_from_dict(data: Dict[str, Any]) -> RequirementNode:
     if typ == "CHOOSE_CREDITS":
         return ChooseCreditsRequirement(
             credits=int(data["credits"]),
-            course_codes=tuple(data["course_codes"]),
+            course_codes=tuple(_sanitize_code(c) for c in data["course_codes"]),
         )
     if typ == "CHOOSE_N":
         return ChooseNRequirement(
             n=int(data["n"]),
-            course_codes=tuple(data["course_codes"]),
+            course_codes=tuple(_sanitize_code(c) for c in data["course_codes"]),
         )
     if typ == "MIN_LEVEL_CREDITS":
         return MinLevelCreditsRequirement(
@@ -125,8 +132,3 @@ def requirement_from_dict(data: Dict[str, Any]) -> RequirementNode:
         )
     raise ValueError(f"Unknown requirement type: {typ!r}")
 
-
-def requirement_collect_course_codes(node: RequirementNode) -> Set[str]:
-    """Recursively collect all course codes mentioned in a requirement tree."""
-    from .requirement_utils import collect_course_codes
-    return collect_course_codes(node)

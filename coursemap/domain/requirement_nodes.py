@@ -25,7 +25,7 @@ class CourseRequirement(RequirementNode):
     course_code: str
 
     def is_satisfied(self, plan: DegreePlan) -> bool:
-        return self.course_code in plan.all_course_codes()
+        return self.course_code in plan.all_course_codes
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,11 @@ class ChooseCreditsRequirement(RequirementNode):
             for course in semester.courses
             if course.code in allowed
         )
+        # Also count courses completed before this plan was generated.
+        total += sum(
+            c.credits for c in plan.prior_completed
+            if c.code in allowed
+        )
         return total >= self.credits
 
 
@@ -74,7 +79,7 @@ class ChooseNRequirement(RequirementNode):
     course_codes: tuple[str, ...]
 
     def is_satisfied(self, plan: DegreePlan) -> bool:
-        plan_codes = plan.all_course_codes()
+        plan_codes = plan.all_course_codes
         chosen = sum(1 for code in self.course_codes if code in plan_codes)
         return chosen >= self.n
 
@@ -137,7 +142,7 @@ class TotalCreditsRequirement(RequirementNode):
     required_credits: int
 
     def is_satisfied(self, plan: DegreePlan) -> bool:
-        return plan.total_credits() == self.required_credits
+        return plan.total_credits() + plan.prior_credits() >= self.required_credits
 
 
 @dataclass(frozen=True)
