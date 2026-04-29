@@ -1,24 +1,35 @@
+"""Fetch qualification and specialisation metadata from Massey."""
+from __future__ import annotations
+import logging
 import time
+
 from coursemap.ingestion.swiftype_client import search
 
 BASE = "https://www.massey.ac.nz"
+logger = logging.getLogger(__name__)
 
 
-def safe(v):
+def _safe(v: object) -> object:
+    """Return the first element of a list, or the value itself."""
     if isinstance(v, list):
         return v[0] if v else None
     return v
 
 
-def discover_qualifications():
+def discover_qualifications() -> tuple[list[dict], list[dict]]:
+    """
+    Page through the Massey Swiftype API and return (qualifications, specialisations).
 
+    Qualifications are degree-level entries (sub_type='qual').
+    Specialisations are major-level entries (sub_type='spec') that map to a
+    parent qualification via qual_code.
+    """
     page = 1
     quals = []
     specs = []
 
     while True:
-
-        print(f"Fetching qualification page {page}")
+        logger.debug("Fetching qualification page %d", page)
 
         payload = {
             "per_page": 100,
@@ -44,27 +55,23 @@ def discover_qualifications():
         }
 
         data = search(payload)
-
         results = data["records"]["course-qual"]
 
         if not results:
             break
 
         for r in results:
-
-            url = safe(r.get("url"))
-
+            url = _safe(r.get("url"))
             item = {
-                "title": safe(r.get("title")),
-                "url": BASE + url if url else None,
-                "qual_code": safe(r.get("qual_code")),
-                "type": safe(r.get("sub_type")),
-                "level": safe(r.get("nzqf_level")),
-                "length": safe(r.get("qual_length")),
-                "max_duration": safe(r.get("max_duration")),
-                "intro": safe(r.get("intro")),
+                "title":        _safe(r.get("title")),
+                "url":          BASE + url if url else None,
+                "qual_code":    _safe(r.get("qual_code")),
+                "type":         _safe(r.get("sub_type")),
+                "level":        _safe(r.get("nzqf_level")),
+                "length":       _safe(r.get("qual_length")),
+                "max_duration": _safe(r.get("max_duration")),
+                "intro":        _safe(r.get("intro")),
             }
-
             if item["type"] == "qual":
                 quals.append(item)
             elif item["type"] == "spec":
@@ -73,13 +80,12 @@ def discover_qualifications():
         page += 1
         time.sleep(0.4)
 
-    print(f"Discovered {len(quals)} qualifications")
-    print(f"Discovered {len(specs)} specialisations")
-
+    logger.info("Discovered %d qualifications, %d specialisations", len(quals), len(specs))
     return quals, specs
 
 
-def discover_specialisations():
+def discover_specialisations() -> list[dict]:
+    """Return only the specialisations from discover_qualifications()."""
     _, specs = discover_qualifications()
     return specs
 

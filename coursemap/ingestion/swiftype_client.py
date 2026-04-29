@@ -1,3 +1,5 @@
+"""Thin client for the Massey/Swiftype search API. Used by ingestion scripts."""
+from __future__ import annotations
 import os
 import requests
 
