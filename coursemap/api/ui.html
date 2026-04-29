@@ -1,0 +1,2167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f4c35'/><path d='M8 22 L16 10 L24 22' stroke='%2352b788' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<title>coursemap - Massey Degree Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:        #0b1012;
+  --bg2:       #111719;
+  --bg3:       #171d1f;
+  --bg4:       #1e2527;
+  --border:    rgba(255,255,255,0.07);
+  --border2:   rgba(255,255,255,0.13);
+  --ink:       #e8ebe9;
+  --ink2:      #8fa89a;
+  --ink3:      #556860;
+  --green:     #52b788;
+  --green-dk:  #0f4c35;
+  --green-lt:  rgba(82,183,136,0.12);
+  --green-md:  rgba(82,183,136,0.22);
+  --amber:     #e8a838;
+  --amber-lt:  rgba(232,168,56,0.12);
+  --red:       #e05c5c;
+  --red-lt:    rgba(224,92,92,0.1);
+  --blue:      #5b9bd5;
+  --blue-lt:   rgba(91,155,213,0.12);
+  --r:         6px;
+  --r2:        10px;
+  --r3:        14px;
+  --serif:     'Instrument Serif', Georgia, serif;
+  --sans:      'DM Sans', system-ui, sans-serif;
+  --mono:      'DM Mono', monospace;
+  --sidebar-w: 300px;
+  --header-h:  56px;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  font-family:var(--sans);
+  background:var(--bg);
+  color:var(--ink);
+  min-height:100vh;
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+
+/* ── Header ── */
+header{
+  height:var(--header-h);
+  background:var(--bg2);
+  border-bottom:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  padding:0 1.25rem 0 1.5rem;
+  gap:1rem;
+  position:sticky;
+  top:0;
+  z-index:200;
+}
+
+.logo{
+  font-family:var(--serif);
+  font-size:21px;
+  color:var(--ink);
+  text-decoration:none;
+  letter-spacing:-0.02em;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+.logo-icon{
+  width:26px;height:26px;
+  background:var(--green-dk);
+  border-radius:6px;
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+}
+
+.logo-icon svg{display:block}
+
+.logo-text em{color:var(--green);font-style:normal}
+
+.header-pill{
+  font-size:10px;
+  font-family:var(--mono);
+  padding:3px 8px;
+  border-radius:20px;
+  background:var(--bg4);
+  color:var(--ink3);
+  letter-spacing:0.06em;
+  text-transform:uppercase;
+  border:1px solid var(--border);
+}
+
+#freshness-badge{
+  margin-left:auto;
+  font-size:10px;
+  font-family:var(--mono);
+  color:var(--ink3);
+  display:flex;
+  align-items:center;
+  gap:5px;
+}
+
+#freshness-badge .dot{
+  width:6px;height:6px;border-radius:50%;
+  background:var(--green);
+  flex-shrink:0;
+}
+
+#freshness-badge.stale .dot{background:var(--amber)}
+
+.hamburger{
+  display:none;
+  background:none;border:none;
+  color:var(--ink2);cursor:pointer;
+  padding:6px;border-radius:var(--r);
+  margin-left:auto;
+}
+
+.hamburger:hover{background:var(--bg4);color:var(--ink)}
+
+/* ── Layout ── */
+.layout{
+  display:grid;
+  grid-template-columns:var(--sidebar-w) 1fr;
+  height:calc(100vh - var(--header-h));
+}
+
+/* ── Sidebar ── */
+.sidebar{
+  background:var(--bg2);
+  border-right:1px solid var(--border);
+  overflow-y:auto;
+  padding:1.25rem 1rem;
+  display:flex;
+  flex-direction:column;
+  gap:1.25rem;
+}
+
+.sidebar-section{}
+
+.sidebar-label{
+  font-size:10px;
+  font-weight:600;
+  letter-spacing:0.1em;
+  text-transform:uppercase;
+  color:var(--ink3);
+  margin-bottom:0.6rem;
+  display:block;
+}
+
+/* Form controls */
+.field{display:flex;flex-direction:column;gap:4px}
+
+label.field-label{
+  font-size:11px;
+  font-weight:500;
+  color:var(--ink2);
+  letter-spacing:0.02em;
+}
+
+input[type=text],input[type=number],select,textarea{
+  width:100%;
+  padding:7px 10px;
+  background:var(--bg3);
+  border:1px solid var(--border2);
+  border-radius:var(--r);
+  color:var(--ink);
+  font-size:13px;
+  font-family:var(--sans);
+  outline:none;
+  transition:border-color 0.15s;
+  height:34px;
+}
+
+input:focus,select:focus{border-color:var(--green);box-shadow:0 0 0 2px rgba(82,183,136,0.15)}
+select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238fa89a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+/* Autocomplete */
+.suggest-wrap{position:relative}
+
+.suggestions{
+  position:absolute;top:calc(100% + 4px);left:0;right:0;
+  background:var(--bg3);
+  border:1px solid var(--border2);
+  border-radius:var(--r2);
+  box-shadow:0 8px 32px rgba(0,0,0,0.5);
+  z-index:300;
+  max-height:240px;
+  overflow-y:auto;
+  display:none;
+}
+
+.suggestions.open{display:block}
+
+.sug-item{
+  padding:9px 12px;
+  cursor:pointer;
+  border-bottom:1px solid var(--border);
+  transition:background 0.1s;
+}
+
+.sug-item:last-child{border-bottom:none}
+.sug-item:hover,.sug-item.active{background:var(--green-lt);color:var(--green)}
+
+.sug-name{font-size:13px;line-height:1.3;color:var(--ink)}
+.sug-qual{font-size:11px;color:var(--ink3);margin-top:2px}
+.sug-item:hover .sug-name,.sug-item.active .sug-name{color:var(--green)}
+
+/* Qual filter pills */
+.qual-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+
+.qpill{
+  font-size:10px;font-family:var(--mono);
+  padding:3px 8px;border-radius:20px;
+  border:1px solid var(--border2);
+  cursor:pointer;color:var(--ink3);
+  background:var(--bg3);
+  transition:all 0.1s;
+  white-space:nowrap;
+}
+
+.qpill:hover{border-color:var(--green);color:var(--green)}
+.qpill.active{background:var(--green);color:var(--bg);border-color:var(--green);font-weight:500}
+
+/* Tag input */
+.tag-wrap{
+  min-height:34px;padding:4px 6px;
+  background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);
+  display:flex;flex-wrap:wrap;gap:4px;align-items:center;cursor:text;
+  transition:border-color 0.15s;
+}
+
+.tag-wrap:focus-within{border-color:var(--green);box-shadow:0 0 0 2px rgba(82,183,136,0.15)}
+
+.tag{
+  display:inline-flex;align-items:center;gap:3px;
+  background:var(--green-lt);color:var(--green);
+  border:1px solid rgba(82,183,136,0.25);
+  border-radius:4px;padding:1px 6px;
+  font-size:11px;font-family:var(--mono);
+}
+
+.tag button{background:none;border:none;color:inherit;cursor:pointer;padding:0;line-height:1;font-size:14px;opacity:0.7}
+.tag button:hover{opacity:1}
+
+.tag-wrap input{
+  border:none;background:none;outline:none;
+  font-size:12px;font-family:var(--mono);
+  min-width:80px;flex:1;color:var(--ink);height:22px;padding:0 4px;
+}
+
+/* Toggle */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0}
+.toggle-text{font-size:13px;color:var(--ink2)}
+
+.toggle{position:relative;width:34px;height:18px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0;position:absolute}
+.toggle-track{
+  position:absolute;inset:0;
+  background:var(--bg4);border:1px solid var(--border2);
+  border-radius:20px;cursor:pointer;transition:all 0.2s;
+}
+.toggle input:checked+.toggle-track{background:var(--green);border-color:var(--green)}
+.toggle-thumb{
+  position:absolute;width:12px;height:12px;
+  background:var(--ink3);border-radius:50%;
+  top:2px;left:2px;
+  transition:transform 0.2s,background 0.2s;pointer-events:none;
+}
+.toggle input:checked~.toggle-thumb{transform:translateX(16px);background:white}
+
+/* Divider */
+.divider{height:1px;background:var(--border);margin:0.1rem 0}
+
+/* Generate button */
+.btn-generate{
+  width:100%;padding:10px;
+  background:var(--green);color:var(--bg);
+  border:none;border-radius:var(--r);
+  font-size:14px;font-weight:600;
+  font-family:var(--sans);
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  transition:all 0.15s;
+  letter-spacing:0.01em;
+}
+
+.btn-generate:hover{background:#63cfA0;transform:translateY(-1px)}
+.btn-generate:active{transform:translateY(0)}
+.btn-generate:disabled{background:var(--bg4);color:var(--ink3);cursor:not-allowed;transform:none}
+
+/* Secondary buttons */
+.btn-row{display:flex;gap:6px;flex-wrap:wrap}
+
+.btn-sm{
+  padding:6px 12px;
+  background:var(--bg3);
+  border:1px solid var(--border2);
+  border-radius:var(--r);
+  font-size:12px;color:var(--ink2);
+  cursor:pointer;font-family:var(--sans);
+  transition:all 0.1s;white-space:nowrap;
+}
+
+.btn-sm:hover{background:var(--bg4);color:var(--ink);border-color:var(--border2)}
+.btn-sm:disabled{opacity:0.35;cursor:not-allowed;pointer-events:none}
+.btn-sm.danger:hover{border-color:var(--red);color:var(--red)}
+
+/* Saved plans */
+.saved-empty{font-size:12px;color:var(--ink3);text-align:center;padding:8px 0}
+
+.saved-item{
+  display:flex;align-items:center;gap:6px;
+  padding:5px 6px;border-radius:var(--r);
+  cursor:pointer;transition:background 0.1s;
+  font-size:12px;
+}
+
+.saved-item:hover{background:var(--bg4)}
+.saved-item.active{background:var(--green-lt);color:var(--green)}
+
+.saved-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.saved-meta{font-size:10px;color:var(--ink3);white-space:nowrap;flex-shrink:0}
+
+.saved-actions{display:flex;gap:2px;opacity:0;flex-shrink:0}
+.saved-item:hover .saved-actions{opacity:1}
+
+.saved-btn{
+  background:none;border:none;cursor:pointer;
+  color:var(--ink3);padding:2px 4px;border-radius:3px;font-size:12px;line-height:1;
+}
+
+.saved-btn:hover{background:var(--bg4);color:var(--red)}
+
+.save-row{display:flex;gap:4px;margin-top:0.4rem}
+.save-row input{flex:1;min-width:0;font-size:12px;height:30px;padding:0 8px}
+.save-row .btn-sm{padding:4px 8px;font-size:12px;white-space:nowrap}
+
+/* ── Main ── */
+.main{
+  overflow-y:auto;
+  padding:2rem;
+  display:flex;
+  flex-direction:column;
+  gap:1.5rem;
+}
+
+/* Empty state */
+.empty-state{
+  flex:1;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:1rem;text-align:center;padding:4rem 2rem;
+}
+
+.empty-art{
+  width:80px;height:80px;margin-bottom:0.5rem;
+  background:var(--bg3);border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--border2);
+}
+
+.empty-art svg{opacity:0.4}
+
+.empty-state h2{
+  font-family:var(--serif);font-size:28px;font-weight:400;
+  color:var(--ink);letter-spacing:-0.02em;line-height:1.2;
+}
+
+.empty-state p{font-size:14px;color:var(--ink2);max-width:340px;line-height:1.6}
+
+.empty-pills{
+  display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:0.5rem;
+}
+
+.empty-pill{
+  padding:8px 16px;
+  background:var(--bg3);border:1px solid var(--border2);
+  border-radius:20px;font-size:12px;color:var(--ink2);
+  cursor:pointer;transition:all 0.1s;
+}
+
+.empty-pill:hover{background:var(--green-lt);border-color:var(--green);color:var(--green)}
+
+/* Loading */
+.loading-wrap{
+  flex:1;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:1rem;
+}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:0.5}50%{opacity:1}}
+
+.spinner{
+  width:36px;height:36px;
+  border:2px solid var(--border2);
+  border-top-color:var(--green);
+  border-radius:50%;
+  animation:spin 0.8s linear infinite;
+}
+
+.loading-text{font-size:13px;color:var(--ink3);animation:pulse 1.5s ease infinite}
+
+/* Error */
+.error-state{
+  flex:1;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:0.75rem;text-align:center;padding:4rem 2rem;
+}
+
+.error-icon{font-size:32px}
+.error-title{font-size:16px;font-weight:500;color:var(--red)}
+.error-body{font-size:13px;color:var(--ink2);max-width:400px;line-height:1.6;white-space:pre-line}
+
+/* ── Plan output ── */
+
+/* Plan header */
+.plan-hdr{
+  display:flex;align-items:flex-start;
+  justify-content:space-between;gap:1rem;
+  flex-wrap:wrap;
+}
+
+.plan-title h1{
+  font-family:var(--serif);font-size:28px;font-weight:400;
+  letter-spacing:-0.02em;line-height:1.2;color:var(--ink);
+}
+
+.plan-title .sub{
+  font-size:11px;color:var(--ink3);margin-top:4px;
+  font-family:var(--mono);letter-spacing:0.04em;
+}
+
+.plan-actions{display:flex;gap:6px;flex-wrap:wrap}
+
+/* Disclaimer */
+.disclaimer{
+  background:var(--amber-lt);
+  border:1px solid rgba(232,168,56,0.2);
+  border-radius:var(--r);
+  padding:9px 14px;
+  font-size:12px;color:var(--amber);
+  display:flex;gap:8px;align-items:flex-start;line-height:1.5;
+}
+
+.disclaimer a{color:var(--amber);text-decoration:underline}
+
+/* Stats */
+.stats-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(110px,1fr));
+  gap:8px;
+}
+
+.stat-card{
+  background:var(--bg2);
+  border:1px solid var(--border);
+  border-radius:var(--r2);
+  padding:12px 14px;
+}
+
+.stat-val{
+  font-size:26px;font-weight:500;
+  font-family:var(--serif);
+  color:var(--ink);line-height:1;
+}
+
+.stat-lbl{
+  font-size:10px;color:var(--ink3);
+  margin-top:4px;text-transform:uppercase;letter-spacing:0.06em;
+}
+
+.stat-card.green .stat-val{color:var(--green)}
+.stat-card.amber .stat-val{color:var(--amber)}
+
+/* Progress bar */
+.progress-wrap{
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:var(--r2);padding:14px 16px;
+}
+
+.progress-labels{
+  display:flex;justify-content:space-between;
+  font-size:11px;color:var(--ink2);
+  font-family:var(--mono);margin-bottom:8px;
+}
+
+.progress-track{
+  height:8px;background:var(--bg4);border-radius:4px;overflow:hidden;display:flex;
+}
+
+.progress-fill-completed{height:100%;background:var(--green);transition:width 0.6s ease}
+.progress-fill-planned{height:100%;background:rgba(82,183,136,0.4);transition:width 0.6s ease}
+
+.progress-legend{
+  display:flex;gap:14px;margin-top:8px;
+  font-size:10px;color:var(--ink3);font-family:var(--mono);
+}
+
+.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;margin-right:3px;vertical-align:middle}
+
+/* Validation panel */
+.val-panel{
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:var(--r2);overflow:hidden;
+}
+
+.val-header{
+  display:flex;align-items:center;gap:10px;padding:11px 16px;
+  cursor:pointer;user-select:none;
+  background:var(--bg3);border-bottom:1px solid var(--border);
+  transition:background 0.1s;
+}
+
+.val-header:hover{background:var(--bg4)}
+
+.val-badge{
+  font-size:10px;font-family:var(--mono);font-weight:600;
+  padding:2px 8px;border-radius:20px;letter-spacing:0.05em;
+}
+
+.val-badge.pass{background:var(--green-lt);color:var(--green)}
+.val-badge.fail{background:var(--red-lt);color:var(--red)}
+
+.val-title{font-size:13px;font-weight:500;flex:1}
+.val-chevron{color:var(--ink3);font-size:11px;transition:transform 0.2s;margin-left:auto}
+.val-header.open .val-chevron{transform:rotate(180deg)}
+
+.val-body{padding:12px 16px;display:none}
+.val-body.open{display:block}
+
+.check-item{
+  display:flex;gap:8px;align-items:flex-start;
+  padding:5px 0;font-size:12px;
+  border-bottom:1px solid var(--border);
+}
+
+.check-item:last-child{border-bottom:none}
+.check-icon{flex-shrink:0;font-size:13px;margin-top:1px}
+.check-pass{color:var(--green)}
+.check-fail{color:var(--red)}
+.check-label{flex:1;color:var(--ink2);line-height:1.4}
+.check-children{margin-left:22px;margin-top:4px}
+.check-pool{font-family:var(--mono);font-size:10px;color:var(--ink3);margin-top:3px}
+
+/* Gap banner */
+.gap-banner{
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:var(--r2);padding:14px 16px;
+}
+
+.gap-banner h4{font-size:13px;font-weight:500;color:var(--ink);margin-bottom:6px}
+.gap-banner p{font-size:12px;color:var(--ink2);line-height:1.5}
+
+.elective-list{margin-top:12px;display:flex;flex-direction:column;gap:4px}
+
+.elective-row{
+  display:grid;
+  grid-template-columns:70px 36px 1fr auto;
+  gap:8px;align-items:center;
+  font-size:12px;padding:4px 0;
+  border-bottom:1px solid var(--border);
+}
+
+.elective-row:last-child{border-bottom:none}
+.elective-code{font-family:var(--mono);font-size:11px;color:var(--green)}
+.elective-cr{font-family:var(--mono);color:var(--ink3)}
+.elective-title{color:var(--ink2)}
+.elective-sem{font-size:10px;font-family:var(--mono);color:var(--ink3);text-align:right}
+
+/* Warning banners */
+.warn-banner{
+  background:var(--amber-lt);border:1px solid rgba(232,168,56,0.18);
+  border-radius:var(--r);padding:9px 14px;
+  font-size:12px;color:var(--amber);
+  display:flex;gap:8px;align-items:flex-start;line-height:1.5;
+}
+
+/* Year group */
+.year-group{margin-bottom:0.25rem}
+
+.year-header{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 0 6px;
+}
+
+.year-label{
+  font-size:11px;font-family:var(--mono);
+  color:var(--ink3);text-transform:uppercase;letter-spacing:0.1em;white-space:nowrap;
+}
+
+.year-line{flex:1;height:1px;background:var(--border)}
+
+.year-cr{
+  font-size:10px;font-family:var(--mono);
+  color:var(--ink3);white-space:nowrap;
+}
+
+/* Semester block */
+.sem-block{
+  background:var(--bg2);
+  border:1px solid var(--border);
+  border-radius:var(--r2);
+  overflow:hidden;
+  margin-bottom:10px;
+}
+
+.sem-head{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 14px;
+  background:var(--bg3);
+  border-bottom:1px solid var(--border);
+}
+
+.sem-label{
+  font-family:var(--mono);font-size:12px;font-weight:500;
+  color:var(--ink);
+}
+
+.sem-cal{font-size:10px;color:var(--ink3);font-family:var(--mono)}
+
+.sem-cr{font-family:var(--mono);font-size:11px;color:var(--ink3);margin-left:auto}
+
+.sem-bar{width:80px;height:4px;background:var(--bg4);border-radius:2px;overflow:hidden;flex-shrink:0}
+.sem-bar-fill{height:100%;background:var(--green);border-radius:2px;transition:width 0.4s ease}
+
+.sem-warn{
+  font-size:10px;font-family:var(--mono);
+  color:var(--amber);background:var(--amber-lt);
+  border:1px solid rgba(232,168,56,0.2);
+  border-radius:4px;padding:2px 6px;white-space:nowrap;
+}
+
+.mark-done-btn{
+  font-size:10px;font-family:var(--mono);
+  background:none;border:1px solid var(--border2);
+  border-radius:4px;padding:2px 7px;
+  color:var(--ink3);cursor:pointer;
+  white-space:nowrap;transition:all 0.1s;
+}
+
+.mark-done-btn:hover{border-color:var(--green);color:var(--green)}
+
+/* Course cards grid */
+.sem-courses{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+}
+
+/* Course card */
+.course-card{
+  padding:12px 14px;
+  border-right:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+  cursor:pointer;
+  transition:background 0.12s;
+  position:relative;
+}
+
+.course-card:hover{background:var(--green-lt)}
+.course-card.filler{background:rgba(82,183,136,0.03)}
+
+.filler-badge{
+  position:absolute;top:8px;right:8px;
+  font-size:9px;font-family:var(--mono);text-transform:uppercase;
+  letter-spacing:0.06em;color:var(--ink3);
+  background:var(--bg3);border:1px solid var(--border);
+  padding:1px 5px;border-radius:3px;
+}
+
+.course-card.filler .filler-badge{color:var(--green);border-color:rgba(82,183,136,0.2);background:var(--green-lt)}
+
+.shared-badge{
+  position:absolute;top:8px;right:8px;
+  font-size:9px;font-family:var(--mono);font-weight:600;
+  color:var(--blue);background:var(--blue-lt);
+  border:1px solid rgba(91,155,213,0.25);
+  padding:1px 5px;border-radius:3px;
+}
+
+.course-code{font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:3px}
+.course-title{font-size:12px;color:var(--ink);line-height:1.35}
+
+.course-meta{
+  display:flex;gap:6px;margin-top:5px;
+  font-size:10px;color:var(--ink3);font-family:var(--mono);
+}
+
+.course-level-badge{
+  display:inline-block;
+  font-size:9px;font-family:var(--mono);
+  padding:1px 5px;border-radius:3px;
+  background:var(--bg4);color:var(--ink3);
+  border:1px solid var(--border);
+}
+
+/* ── Course drawer ── */
+.drawer-overlay{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,0.6);
+  z-index:400;opacity:0;pointer-events:none;
+  transition:opacity 0.2s;
+}
+
+.drawer-overlay.open{opacity:1;pointer-events:all}
+
+.drawer{
+  position:fixed;top:0;right:-480px;
+  width:440px;height:100vh;
+  background:var(--bg2);
+  border-left:1px solid var(--border2);
+  padding:1.5rem;
+  overflow-y:auto;
+  transition:right 0.25s cubic-bezier(0.3,0,0.15,1);
+  z-index:401;
+  display:flex;flex-direction:column;gap:1.25rem;
+}
+
+.drawer.open{right:0}
+
+.drawer-close{
+  position:absolute;top:12px;right:12px;
+  background:none;border:none;
+  color:var(--ink3);font-size:18px;cursor:pointer;
+  width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+  border-radius:var(--r);transition:all 0.1s;
+}
+
+.drawer-close:hover{background:var(--bg4);color:var(--ink)}
+
+.drawer-code{font-family:var(--mono);font-size:12px;color:var(--green);margin-bottom:4px}
+
+.drawer-title{
+  font-family:var(--serif);font-size:22px;font-weight:400;
+  color:var(--ink);line-height:1.25;
+  letter-spacing:-0.01em;
+}
+
+.drawer-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+
+.badge{
+  font-size:10px;font-family:var(--mono);
+  padding:3px 8px;border-radius:4px;
+  background:var(--bg3);color:var(--ink3);
+  border:1px solid var(--border);
+}
+
+.badge.green{background:var(--green-lt);color:var(--green);border-color:rgba(82,183,136,0.2)}
+.badge.amber{background:var(--amber-lt);color:var(--amber);border-color:rgba(232,168,56,0.2)}
+
+.drawer-section h4{
+  font-size:10px;font-weight:600;text-transform:uppercase;
+  letter-spacing:0.08em;color:var(--ink3);margin-bottom:8px;
+}
+
+.drawer-desc{
+  font-size:13px;color:var(--ink2);line-height:1.6;
+}
+
+.offering-pills{display:flex;flex-wrap:wrap;gap:6px}
+
+.offering-pill{
+  font-size:11px;font-family:var(--mono);
+  padding:4px 10px;border-radius:20px;
+  background:var(--bg3);color:var(--ink2);
+  border:1px solid var(--border);
+}
+
+/* Prereq tree */
+.prereq-tree{
+  font-size:12px;font-family:var(--mono);color:var(--ink2);
+  background:var(--bg3);padding:10px 12px;border-radius:var(--r);
+  line-height:1.7;
+}
+
+.pnode-op{
+  color:var(--ink3);font-size:10px;text-transform:uppercase;
+  letter-spacing:0.1em;padding:0 4px;
+}
+
+.pnode-code{
+  display:inline-flex;align-items:center;
+  background:var(--bg2);border:1px solid var(--border2);
+  border-radius:3px;padding:1px 7px;
+  color:var(--green);cursor:pointer;
+  transition:background 0.1s;text-decoration:none;
+}
+
+.pnode-code:hover{background:var(--green-lt)}
+
+/* ── Course search modal ── */
+.modal-overlay{
+  display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,0.7);
+  z-index:500;align-items:center;justify-content:center;
+}
+
+.modal-overlay.open{display:flex}
+
+.modal{
+  background:var(--bg2);
+  border:1px solid var(--border2);
+  border-radius:var(--r3);
+  width:min(640px,95vw);
+  max-height:85vh;
+  display:flex;flex-direction:column;
+  box-shadow:0 32px 80px rgba(0,0,0,0.7);
+}
+
+.modal-head{
+  padding:14px 18px 12px;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:10px;
+}
+
+.modal-head h3{font-size:14px;font-weight:500;flex:1}
+
+.modal-search{
+  flex:1;padding:7px 12px;
+  background:var(--bg3);border:1px solid var(--border2);
+  border-radius:var(--r);font-size:13px;color:var(--ink);
+  font-family:var(--sans);outline:none;
+}
+
+.modal-search:focus{border-color:var(--green)}
+
+.modal-filters{
+  padding:8px 18px;border-bottom:1px solid var(--border);
+  display:flex;gap:6px;flex-wrap:wrap;
+}
+
+.f-pill{
+  font-size:11px;font-family:var(--mono);
+  padding:3px 10px;border-radius:20px;
+  border:1px solid var(--border2);cursor:pointer;
+  background:var(--bg3);color:var(--ink3);
+  transition:all 0.1s;
+}
+
+.f-pill.active,.f-pill:hover{background:var(--green);color:var(--bg);border-color:var(--green)}
+
+.modal-count{
+  font-size:11px;font-family:var(--mono);color:var(--ink3);
+  padding:5px 18px;border-bottom:1px solid var(--border);
+}
+
+.modal-results{overflow-y:auto;flex:1;padding:4px 0}
+
+.modal-row{
+  display:grid;grid-template-columns:66px 1fr 40px 80px;
+  gap:8px;align-items:center;
+  padding:8px 18px;cursor:pointer;
+  border-bottom:1px solid var(--border);
+  transition:background 0.1s;
+}
+
+.modal-row:hover{background:var(--green-lt)}
+.modal-row:last-child{border-bottom:none}
+.modal-code{font-family:var(--mono);font-size:11px;color:var(--green)}
+.modal-title{font-size:12px;color:var(--ink);line-height:1.3}
+.modal-cr{font-family:var(--mono);font-size:11px;color:var(--ink3);text-align:right}
+.modal-sem{font-size:10px;font-family:var(--mono);color:var(--ink3)}
+.modal-empty{text-align:center;padding:40px;color:var(--ink3);font-size:13px}
+
+/* Toast */
+.toast{
+  position:fixed;bottom:1.5rem;right:1.5rem;
+  background:var(--bg4);border:1px solid var(--border2);
+  color:var(--ink);padding:10px 16px;border-radius:var(--r);
+  font-size:13px;opacity:0;transform:translateY(8px);
+  transition:all 0.2s;z-index:600;pointer-events:none;
+  box-shadow:0 8px 24px rgba(0,0,0,0.4);
+  max-width:320px;
+}
+
+.toast.show{opacity:1;transform:translateY(0)}
+
+/* Double major shared banner */
+.shared-banner{
+  background:var(--blue-lt);border:1px solid rgba(91,155,213,0.2);
+  border-radius:var(--r2);padding:14px 16px;
+}
+
+.shared-banner h4{font-size:13px;font-weight:500;color:var(--blue);margin-bottom:6px}
+.shared-banner p{font-size:12px;color:var(--ink2);line-height:1.5}
+.shared-codes{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+
+/* Mobile responsive */
+@media(max-width:900px){
+  .layout{grid-template-columns:1fr;height:auto}
+  .sidebar{
+    position:fixed;top:var(--header-h);left:0;
+    width:100%;max-width:340px;
+    height:calc(100vh - var(--header-h));
+    z-index:150;
+    transform:translateX(-100%);
+    transition:transform 0.25s cubic-bezier(0.3,0,0.15,1);
+    box-shadow:4px 0 32px rgba(0,0,0,0.5);
+  }
+  .sidebar.open{transform:translateX(0)}
+  .sidebar-backdrop{
+    display:none;position:fixed;inset:0;top:var(--header-h);
+    background:rgba(0,0,0,0.6);z-index:140;
+  }
+  .sidebar-backdrop.open{display:block}
+  .main{padding:1rem;min-height:calc(100vh - var(--header-h))}
+  .drawer{width:100%;right:-100%}
+  .hamburger{display:flex;align-items:center;justify-content:center}
+  .plan-hdr{flex-direction:column}
+  .plan-actions{width:100%}
+  .plan-actions .btn-sm{flex:1}
+  .sem-courses{grid-template-columns:1fr}
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .modal-row{grid-template-columns:60px 1fr 36px}
+  .modal-sem{display:none}
+  #freshness-badge{display:none}
+  .header-pill{display:none}
+  .fab{display:flex !important}
+}
+
+/* FAB */
+.fab{
+  display:none;
+  position:fixed;bottom:1.5rem;right:1.5rem;
+  width:52px;height:52px;border-radius:50%;
+  background:var(--green);color:var(--bg);
+  border:none;cursor:pointer;
+  align-items:center;justify-content:center;
+  box-shadow:0 4px 20px rgba(82,183,136,0.4);
+  z-index:130;font-size:24px;
+  transition:all 0.2s;
+}
+
+.fab:hover{background:#63cfA0;transform:scale(1.05)}
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">
+    <div class="logo-icon">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <path d="M2 11 L7 3 L12 11" stroke="#52b788" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <span class="logo-text">course<em>map</em></span>
+  </a>
+  <span class="header-pill">Massey University</span>
+  <div id="freshness-badge" class="freshness-badge" style="opacity:0.4">
+    <span class="dot"></span>
+    <span id="freshness-text">loading…</span>
+  </div>
+  <button class="hamburger" onclick="toggleSidebar()" aria-label="Menu">
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <rect x="2" y="4" width="14" height="1.5" rx="0.75" fill="currentColor"/>
+      <rect x="2" y="8.25" width="14" height="1.5" rx="0.75" fill="currentColor"/>
+      <rect x="2" y="12.5" width="14" height="1.5" rx="0.75" fill="currentColor"/>
+    </svg>
+  </button>
+</header>
+
+<div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
+
+<div class="layout">
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-section">
+      <span class="sidebar-label">Major</span>
+      <div class="field">
+        <label class="field-label">Primary major</label>
+        <div class="suggest-wrap">
+          <input type="text" id="major-input" placeholder="Search majors…" autocomplete="off">
+          <div class="suggestions" id="suggestions"></div>
+        </div>
+        <div class="qual-pills" id="qual-pills">
+          <span class="qpill active" data-qual="" onclick="setQualFilter(this,'')">All</span>
+        </div>
+      </div>
+      <div class="field" style="margin-top:8px">
+        <label class="field-label">Double major (optional)</label>
+        <div class="suggest-wrap">
+          <input type="text" id="double-input" placeholder="Second major…" autocomplete="off">
+          <div class="suggestions" id="suggestions-dm"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="sidebar-section">
+      <span class="sidebar-label">Options</span>
+      <div class="row2">
+        <div class="field">
+          <label class="field-label">Start year</label>
+          <input type="number" id="start-year" value="2026" min="2024" max="2035">
+        </div>
+        <div class="field">
+          <label class="field-label">Semester</label>
+          <select id="start-sem">
+            <option value="S1">S1 · Feb</option>
+            <option value="S2">S2 · Jul</option>
+            <option value="SS">SS · Nov</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Credits / sem</label>
+          <select id="max-credits">
+            <option value="15">15cr · light</option>
+            <option value="30">30cr · part-time</option>
+            <option value="45">45cr · 3 courses</option>
+            <option value="60" selected>60cr · full-time</option>
+            <option value="75">75cr · heavy</option>
+            <option value="90">90cr · accelerated</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Max courses / sem</label>
+          <input type="number" id="max-per-sem" placeholder="no limit" min="1" max="10">
+        </div>
+      </div>
+      <div class="row2" style="margin-top:8px">
+        <div class="field">
+          <label class="field-label">Campus</label>
+          <select id="campus">
+            <option value="D">Distance (D)</option>
+            <option value="M">Manawatū (M)</option>
+            <option value="A">Albany (A)</option>
+            <option value="W">Wellington (W)</option>
+            <option value="N">Northshore (N)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Mode</label>
+          <select id="mode">
+            <option value="DIS">Distance</option>
+            <option value="INT">Internal</option>
+            <option value="BLK">Block</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Transfer credits</label>
+          <input type="number" id="transfer" value="0" min="0" max="360" step="15">
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="sidebar-section">
+      <span class="sidebar-label">Course filters</span>
+      <div class="field">
+        <label class="field-label">Already completed</label>
+        <div class="tag-wrap" id="completed-wrap">
+          <input type="text" id="completed-input" placeholder="159101, 159102…">
+        </div>
+      </div>
+      <div class="field" style="margin-top:8px">
+        <label class="field-label">Preferred electives</label>
+        <div class="tag-wrap" id="prefer-wrap">
+          <input type="text" id="prefer-input" placeholder="course codes…">
+        </div>
+      </div>
+      <div class="field" style="margin-top:8px">
+        <label class="field-label">Exclude courses</label>
+        <div class="tag-wrap" id="exclude-wrap">
+          <input type="text" id="exclude-input" placeholder="course codes…">
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="sidebar-section">
+      <span class="sidebar-label">Flags</span>
+      <div class="toggle-row">
+        <span class="toggle-text">Auto-fill free electives</span>
+        <label class="toggle">
+          <input type="checkbox" id="auto-fill" checked>
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-text">Skip summer school</span>
+        <label class="toggle">
+          <input type="checkbox" id="no-summer" checked>
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+    </div>
+
+    <button class="btn-generate" id="btn-generate" onclick="generatePlan()">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v11M1 6.5h11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      Generate plan
+    </button>
+
+    <div class="btn-row">
+      <button class="btn-sm" id="btn-json" onclick="downloadJson()" disabled>↓ JSON</button>
+      <button class="btn-sm" id="btn-ical" onclick="downloadIcal()" disabled>↓ iCal</button>
+      <button class="btn-sm" id="btn-html" onclick="downloadHtml()" disabled>↓ HTML</button>
+      <button class="btn-sm" id="btn-share" onclick="copyLink()" disabled style="flex:1">Share link</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="sidebar-section">
+      <span class="sidebar-label">Saved plans</span>
+      <div id="saved-list"><div class="saved-empty">No saved plans yet.</div></div>
+      <div class="save-row" id="save-row" style="display:none">
+        <input id="save-name" type="text" placeholder="Plan name…" maxlength="48"
+               onkeydown="if(event.key==='Enter')commitSave();if(event.key==='Escape')cancelSave();">
+        <button class="btn-sm" onclick="commitSave()">Save</button>
+        <button class="btn-sm" onclick="cancelSave()">✕</button>
+      </div>
+      <button class="btn-sm" id="btn-save" style="width:100%;margin-top:6px" onclick="promptSave()" disabled>
+        Save current plan…
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <main class="main" id="main">
+    <div class="empty-state" id="empty-state">
+      <div class="empty-art">
+        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+          <rect x="4" y="8" width="28" height="3" rx="1.5" fill="#52b788"/>
+          <rect x="4" y="16" width="20" height="3" rx="1.5" fill="#52b788" opacity="0.6"/>
+          <rect x="4" y="24" width="24" height="3" rx="1.5" fill="#52b788" opacity="0.3"/>
+        </svg>
+      </div>
+      <h2>Plan your degree</h2>
+      <p>Pick a major and hit Generate plan to build your personalised semester-by-semester schedule.</p>
+      <div class="empty-pills">
+        <span class="empty-pill" onclick="quickPick('Computer Science – Bachelor of Information Sciences')">Computer Science</span>
+        <span class="empty-pill" onclick="quickPick('Psychology – Bachelor of Arts')">Psychology</span>
+        <span class="empty-pill" onclick="quickPick('Finance – Bachelor of Business')">Finance</span>
+        <span class="empty-pill" onclick="openCourseModal()">Browse all courses →</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ── Drawer ── -->
+<div class="drawer-overlay" id="overlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <button class="drawer-close" onclick="closeDrawer()">✕</button>
+  <div id="drawer-content"></div>
+</div>
+
+<!-- ── Course modal ── -->
+<div class="modal-overlay" id="course-modal" onclick="closeCourseModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <h3>Browse courses</h3>
+      <input class="modal-search" id="modal-q" type="text" placeholder="Search by title or code…" oninput="modalSearch(this.value)" autocomplete="off">
+      <button class="drawer-close" style="position:static;flex-shrink:0" onclick="closeCourseModal()">✕</button>
+    </div>
+    <div class="modal-filters" id="modal-filters">
+      <span class="f-pill active" data-level="" onclick="setModalLevel(this,'')">All levels</span>
+      <span class="f-pill" data-level="100" onclick="setModalLevel(this,'100')">L100</span>
+      <span class="f-pill" data-level="200" onclick="setModalLevel(this,'200')">L200</span>
+      <span class="f-pill" data-level="300" onclick="setModalLevel(this,'300')">L300</span>
+      <span class="f-pill" data-level="700" onclick="setModalLevel(this,'700')">Postgrad</span>
+    </div>
+    <div class="modal-count" id="modal-count">Loading…</div>
+    <div class="modal-results" id="modal-results"></div>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div class="toast" id="toast"></div>
+
+<!-- ── FAB ── -->
+<button class="fab" id="fab" onclick="toggleSidebar()">⊕</button>
+
+<script>
+'use strict';
+const API = '/api';
+let currentPlan = null;
+let fillerCodes = new Set();
+let sharedCodes = new Set();
+let allMajors = [];
+let modalCache = null;
+let modalLevel = '';
+let qualFilter = '';
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+async function init() {
+  try {
+    const fr = await fetch(`${API}/`).then(r => r.json());
+    const badge = document.getElementById('freshness-badge');
+    const text = document.getElementById('freshness-text');
+    if (fr.dataset) {
+      text.textContent = `data: ${fr.dataset.scrape_date}`;
+      badge.style.opacity = '1';
+      if (fr.dataset.is_stale) badge.classList.add('stale');
+    } else {
+      text.textContent = 'data loaded';
+      badge.style.opacity = '0.7';
+    }
+  } catch(e) {
+    document.getElementById('freshness-text').textContent = 'offline';
+  }
+
+  try {
+    const mRes = await fetch(`${API}/majors?limit=500`).then(r => r.json());
+    allMajors = mRes.majors || [];
+    buildQualPills();
+  } catch(e) {}
+
+  // Auto-detect current year + semester
+  const now = new Date();
+  const yr = now.getFullYear();
+  const mo = now.getMonth() + 1;
+  const p = new URLSearchParams(location.search);
+  if (!p.get('year')) document.getElementById('start-year').value = yr;
+  if (!p.get('sem')) {
+    const sem = (mo>=2&&mo<=6)?'S1':(mo>=7&&mo<=11)?'S2':'SS';
+    document.getElementById('start-sem').value = sem;
+  }
+
+  setupAutocomplete('major-input','suggestions');
+  setupAutocomplete('double-input','suggestions-dm');
+  setupTagInput('completed-input','completed-wrap');
+  setupTagInput('prefer-input','prefer-wrap');
+  setupTagInput('exclude-input','exclude-wrap');
+  restoreFromUrl();
+  renderSavedPlans();
+}
+
+// ── Qual filter pills ─────────────────────────────────────────────────────────
+
+function buildQualPills() {
+  const container = document.getElementById('qual-pills');
+  const buckets = [
+    { label:'Bachelor', match: q => q.startsWith('Bachelor') && !q.includes('Honours') },
+    { label:'Honours',  match: q => q.includes('Honours') },
+    { label:'Postgrad', match: q => q.startsWith('Postgraduate')||q.startsWith('Graduate') },
+    { label:'Master',   match: q => q.startsWith('Master') },
+    { label:'Diploma',  match: q => q.startsWith('Diploma') },
+  ];
+  const quals = allMajors.map(m => m.qualification_type||'').filter(Boolean);
+  buckets.filter(b => quals.some(q => b.match(q))).forEach(b => {
+    const pill = document.createElement('span');
+    pill.className = 'qpill';
+    pill.dataset.qual = b.label;
+    pill.textContent = b.label;
+    pill.onclick = () => setQualFilter(pill, b.label);
+    container.appendChild(pill);
+  });
+}
+
+function setQualFilter(el, val) {
+  document.querySelectorAll('.qpill').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  qualFilter = val;
+}
+
+// ── Autocomplete ──────────────────────────────────────────────────────────────
+
+function setupAutocomplete(inputId, boxId) {
+  const inp = document.getElementById(inputId);
+  const box = document.getElementById(boxId);
+  let idx = -1;
+
+  function show(q) {
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = allMajors.filter(m => {
+      const name = (m.name||m).toLowerCase().replace(/[–-]/g,' ');
+      const toks = name.split(/\s+/);
+      const wordOk = !words.length || words.every(w => toks.some(t => t.includes(w)));
+      const qt = m.qualification_type||'';
+      const qualOk = !qualFilter || (() => {
+        if (qualFilter==='Bachelor') return qt.startsWith('Bachelor')&&!qt.includes('Honours');
+        if (qualFilter==='Honours')  return qt.includes('Honours');
+        if (qualFilter==='Postgrad') return qt.startsWith('Postgraduate')||qt.startsWith('Graduate');
+        if (qualFilter==='Master')   return qt.startsWith('Master');
+        if (qualFilter==='Diploma')  return qt.startsWith('Diploma');
+        return qt.includes(qualFilter);
+      })();
+      return wordOk && qualOk;
+    }).slice(0,14);
+
+    if (!matches.length) { box.classList.remove('open'); return; }
+
+    box.innerHTML = matches.map(m => {
+      const name = m.name||m;
+      const major = name.split(/\s*[–-]\s*/)[0].trim();
+      const qual  = m.qualification_type||'';
+      const safe  = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      return `<div class="sug-item" data-val="${escAttr(name)}" onclick="pickSug('${inputId}','${boxId}','${safe}')">
+        <div class="sug-name">${esc(major)}</div>
+        ${qual ? `<div class="sug-qual">${esc(qual)}</div>` : ''}
+      </div>`;
+    }).join('');
+    box.classList.add('open');
+    idx = -1;
+  }
+
+  inp.addEventListener('focus', () => { if (allMajors.length) show(inp.value); });
+  inp.addEventListener('input', () => show(inp.value));
+  inp.addEventListener('keydown', e => {
+    const items = box.querySelectorAll('.sug-item');
+    if (e.key==='ArrowDown') { idx=Math.min(idx+1,items.length-1); hlSug(items,idx); e.preventDefault(); }
+    else if (e.key==='ArrowUp') { idx=Math.max(idx-1,0); hlSug(items,idx); e.preventDefault(); }
+    else if (e.key==='Enter'&&idx>=0) { items[idx].click(); e.preventDefault(); }
+    else if (e.key==='Escape') box.classList.remove('open');
+  });
+  document.addEventListener('click', e => {
+    if (!inp.contains(e.target)&&!box.contains(e.target)) box.classList.remove('open');
+  });
+}
+
+function hlSug(items, i) {
+  items.forEach((el,j) => el.classList.toggle('active', j===i));
+  if (items[i]) items[i].scrollIntoView({block:'nearest'});
+}
+
+function pickSug(inputId, boxId, val) {
+  document.getElementById(inputId).value = val;
+  document.getElementById(boxId).classList.remove('open');
+}
+
+// ── Tag inputs ────────────────────────────────────────────────────────────────
+
+function setupTagInput(inputId, wrapId) {
+  const inp = document.getElementById(inputId);
+  inp.addEventListener('keydown', e => {
+    if (['Enter','Tab',','].includes(e.key) && inp.value.trim()) {
+      e.preventDefault();
+      addTag(wrapId, inp.value.trim().toUpperCase().replace(/,/g,''));
+      inp.value='';
+    } else if (e.key==='Backspace' && !inp.value) {
+      const tags = document.querySelectorAll(`#${wrapId} .tag`);
+      if (tags.length) tags[tags.length-1].remove();
+    }
+  });
+  document.getElementById(wrapId).addEventListener('click', () => inp.focus());
+}
+
+function addTag(wrapId, code) {
+  if (!code || code.length < 4) return;
+  const existing = [...document.querySelectorAll(`#${wrapId} .tag`)].map(t => t.dataset.code);
+  if (existing.includes(code)) return;
+  const tag = document.createElement('div');
+  tag.className = 'tag'; tag.dataset.code = code;
+  tag.innerHTML = `${esc(code)}<button onclick="this.parentElement.remove()" type="button">×</button>`;
+  document.getElementById(wrapId).insertBefore(tag, document.querySelector(`#${wrapId} input`));
+}
+
+function getTags(wrapId) {
+  return [...document.querySelectorAll(`#${wrapId} .tag`)].map(t => t.dataset.code);
+}
+
+// ── Quick picks ───────────────────────────────────────────────────────────────
+
+function quickPick(name) {
+  document.getElementById('major-input').value = name;
+  generatePlan();
+}
+
+// ── Generate ──────────────────────────────────────────────────────────────────
+
+async function generatePlan() {
+  const major = document.getElementById('major-input').value.trim();
+  if (!major) {
+    const inp = document.getElementById('major-input');
+    inp.style.borderColor = 'var(--red)';
+    inp.focus();
+    setTimeout(() => inp.style.borderColor = '', 1800);
+    toast('Please enter a major first.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-generate');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  showLoading();
+  closeSidebar();
+
+  const body = {
+    major,
+    double_major: document.getElementById('double-input').value.trim() || null,
+    start_year:   parseInt(document.getElementById('start-year').value),
+    start_semester: document.getElementById('start-sem').value,
+    max_credits:  parseInt(document.getElementById('max-credits').value),
+    max_per_semester: parseInt(document.getElementById('max-per-sem').value) || null,
+    campus:       document.getElementById('campus').value,
+    mode:         document.getElementById('mode').value,
+    transfer_credits: parseInt(document.getElementById('transfer').value)||0,
+    completed:    getTags('completed-wrap'),
+    prefer:       getTags('prefer-wrap'),
+    exclude:      getTags('exclude-wrap'),
+    no_summer:    document.getElementById('no-summer').checked,
+    auto_fill:    document.getElementById('auto-fill').checked,
+  };
+
+  try {
+    const res = await fetch(`${API}/plan`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      let msg = data.detail || 'Plan generation failed.';
+      if (msg.includes('lack a') && msg.includes('offering')) {
+        const m = msg.match(/Valid combinations[^:]*: ([^\."]+)/);
+        if (m) msg += `\n\nTry one of these campus/mode combos: ${m[1].trim()}`;
+      }
+      showError(msg);
+    } else {
+      currentPlan = {request: body, response: data};
+      fillerCodes = new Set(data.filler_codes||[]);
+      sharedCodes = new Set();
+      if (data.double_major_info?.shared_codes) {
+        data.double_major_info.shared_codes.forEach(c => sharedCodes.add(c));
+      }
+      modalCache = null;
+      renderPlan(data);
+      pushUrl(body);
+      setExportButtons(true);
+    }
+  } catch(e) {
+    showError('Network error. Is the coursemap server running?');
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v11M1 6.5h11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> Generate plan';
+}
+
+function setExportButtons(enabled) {
+  ['btn-json','btn-ical','btn-html','btn-share','btn-save'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !enabled;
+  });
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+
+function showLoading() {
+  const es = document.getElementById('empty-state');
+  if (es) es.remove();
+  document.getElementById('main').innerHTML =
+    `<div class="loading-wrap"><div class="spinner"></div><span class="loading-text">Solving prerequisite graph…</span></div>`;
+}
+
+function showError(msg) {
+  document.getElementById('main').innerHTML = `
+    <div class="error-state">
+      <div class="error-icon">⚠</div>
+      <div class="error-title">Could not generate plan</div>
+      <div class="error-body">${esc(msg)}</div>
+    </div>`;
+}
+
+function renderPlan(data) {
+  const meta = data.meta;
+  const sems = data.semesters;
+  const maxCr = Math.max(...sems.map(s => s.credits), 60);
+  const totalPlanned = (meta.credits_planned||0) + (meta.credits_prior||0) + (meta.credits_transfer||0);
+  const gap     = meta.free_elective_gap || 0;    // residual (0 when auto-filled)
+  const rawGap  = meta.raw_elective_gap  || 0;    // original major-data gap
+  const isDouble = !!data.double_major_info;
+
+  const main = document.getElementById('main');
+  main.innerHTML = '';
+
+  // ── Disclaimer
+  const disc = document.createElement('div');
+  disc.className = 'disclaimer';
+  disc.innerHTML = `<span>⚠</span><span><strong>Unofficial tool</strong> - This plan is for guidance only. 
+    Always verify your requirements with Massey's official 
+    <a href="https://www.massey.ac.nz/study/" target="_blank" rel="noopener">programme information</a> 
+    and consult your academic advisor before enrolling.</span>`;
+  main.appendChild(disc);
+
+  // ── Header
+  const hdr = document.createElement('div');
+  hdr.className = 'plan-hdr';
+  const degreeLabel = isDouble
+    ? `${data.double_major_info.first_label} + ${data.double_major_info.second_label}`
+    : meta.major;
+  const startSem = meta.start_semester || 'S1';
+  hdr.innerHTML = `
+    <div class="plan-title">
+      <h1>${esc(degreeLabel)}</h1>
+      <div class="sub">${meta.start_year} ${startSem} · ${meta.campus}/${meta.mode}${meta.credits_transfer ? ' · ' + meta.credits_transfer + 'cr transferred' : ''}</div>
+    </div>
+    <div class="plan-actions">
+      <button class="btn-sm" onclick="downloadJson()">↓ JSON</button>
+      <button class="btn-sm" onclick="downloadIcal()">↓ iCal</button>
+      <button class="btn-sm" onclick="downloadHtml()">↓ HTML</button>
+      <button class="btn-sm" onclick="openCourseModal()">Browse</button>
+    </div>`;
+  main.appendChild(hdr);
+
+  // ── Warnings
+  (data.warnings||[]).forEach(w => {
+    const el = document.createElement('div');
+    el.className = 'warn-banner';
+    el.innerHTML = `<span>⚠</span><span>${esc(w)}</span>`;
+    main.appendChild(el);
+  });
+
+  // ── Stats
+  const sg = document.createElement('div');
+  sg.className = 'stats-grid';
+  const statsData = [
+    { val: sems.length,          lbl: 'Semesters', cls: '' },
+    { val: `${totalPlanned}cr`,  lbl: 'Credits planned', cls: 'green' },
+    { val: `${meta.degree_target||360}cr`, lbl: 'Degree target', cls: '' },
+    { val: gap > 0 ? `${gap}cr` : '-', lbl: 'Elective gap', cls: gap > 0 ? 'amber' : '' },
+  ];
+  if (isDouble) statsData.push({ val: `${data.double_major_info.saved_credits}cr`, lbl: 'Credits saved', cls: 'green' });
+  statsData.forEach(s => {
+    const c = document.createElement('div');
+    c.className = `stat-card ${s.cls}`;
+    c.innerHTML = `<div class="stat-val">${s.val}</div><div class="stat-lbl">${s.lbl}</div>`;
+    sg.appendChild(c);
+  });
+  main.appendChild(sg);
+
+  // ── Double major shared-courses banner
+  if (isDouble && sharedCodes.size > 0) {
+    const sb = document.createElement('div');
+    sb.className = 'shared-banner';
+    const codeList = [...sharedCodes].map(code => {
+      const c = data.semesters.flatMap(s=>s.courses).find(c=>c.code===code);
+      return `<span class="pnode-code" style="cursor:pointer" onclick="openDrawer('${code}')" title="${c?esc(c.title):''}">${code}</span>`;
+    }).join('');
+    sb.innerHTML = `
+      <h4>Shared courses · ${data.double_major_info.saved_credits}cr saved</h4>
+      <p>These courses count toward both majors, reducing the total time and credits needed.</p>
+      <div class="shared-codes">${codeList}</div>`;
+    main.appendChild(sb);
+  }
+
+  // ── Progress bar
+  renderProgressBar(main, meta, totalPlanned);
+
+  // ── Validation panel
+  if (currentPlan) renderValidationPanel(main, currentPlan.request);
+
+  // ── Gap banner
+  if (gap > 0 && !meta.auto_filled_codes?.length) {  // unfilled gap
+    const gb = document.createElement('div');
+    gb.className = 'gap-banner';
+    gb.innerHTML = `
+      <h4>Free elective gap: ${gap}cr</h4>
+      <p>Your major requirements cover ${meta.degree_target - gap}cr of the ${meta.degree_target}cr degree. 
+         You'll need to self-select ${gap}cr of additional courses from any Massey subject.
+         Enable <strong>Auto-fill free electives</strong> to have coursemap suggest courses for you.</p>`;
+    main.appendChild(gb);
+  }
+
+  if (rawGap > 0 && meta.auto_filled_codes?.length) {  // gap was auto-filled
+    const el = document.createElement('div');
+    el.className = 'gap-banner';
+    const allC = data.semesters.flatMap(s=>s.courses);
+    const fillerInPlan = meta.auto_filled_codes.map(code => allC.find(c=>c.code===code)).filter(Boolean);
+    el.innerHTML = `
+      <h4>${rawGap}cr free elective gap · filled with ${fillerInPlan.length} suggested courses</h4>
+      <p>These courses were selected automatically to complete your degree. 
+         You can replace any of them by adding preferred course codes in the sidebar.</p>
+      <div class="elective-list">${fillerInPlan.map(c => `
+        <div class="elective-row">
+          <span class="elective-code" style="cursor:pointer" onclick="openDrawer('${c.code}')">${c.code}</span>
+          <span class="elective-cr">${c.credits}cr</span>
+          <span class="elective-title">${esc(c.title)}</span>
+          <span class="elective-sem">${c.offered_semesters?.join('/') || ''}</span>
+        </div>`).join('')}
+      </div>`;
+    main.appendChild(el);
+  }
+
+  // ── Semesters
+  const semsWrap = document.createElement('div');
+  const calMap = {
+    S1: { label:'Feb – Jun', enrol:'Enrol by late Jan', results:'Results mid Jul' },
+    S2: { label:'Jul – Nov', enrol:'Enrol by late Jun', results:'Results mid Dec' },
+    SS: { label:'Nov – Feb', enrol:'Enrol by early Nov', results:'Results late Feb' },
+  };
+
+  let prevYear = null;
+  let yearWrap = null;
+  sems.forEach((sem, si) => {
+    if (sem.year !== prevYear) {
+      const yearHdr = document.createElement('div');
+      yearHdr.className = 'year-header';
+      const yearCr = sems.filter(s=>s.year===sem.year).reduce((a,s)=>a+s.credits,0);
+      yearHdr.innerHTML = `
+        <span class="year-label">${sem.year}</span>
+        <span class="year-line"></span>
+        <span class="year-cr">${yearCr}cr this year</span>`;
+      semsWrap.appendChild(yearHdr);
+      prevYear = sem.year;
+    }
+
+    const block = document.createElement('div');
+    block.className = 'sem-block';
+
+    const pct = Math.round((sem.credits / maxCr) * 100);
+    const cal = calMap[sem.semester] || {};
+    const highLevelCr = sem.courses.filter(c=>c.level>=300).reduce((a,c)=>a+c.credits,0);
+
+    let warnHtml = '';
+    if (sem.credits > 60) {
+      warnHtml = `<span class="sem-warn">⚠ Heavy: ${sem.credits}cr</span>`;
+    } else if (si < 2 && highLevelCr >= 30) {
+      warnHtml = `<span class="sem-warn">⚠ L3 in year 1</span>`;
+    }
+
+    const nowYear = new Date().getFullYear();
+    const nowSem  = new Date().getMonth() < 6 ? 'S1' : 'S2';
+    const isPast  = sem.year < nowYear || (sem.year === nowYear && sem.semester <= nowSem);
+    const markBtn = isPast
+      ? `<button class="mark-done-btn" onclick="event.stopPropagation();markDone(${JSON.stringify(sem.courses.map(c=>c.code))})">✓ Mark done</button>`
+      : '';
+
+    block.innerHTML = `
+      <div class="sem-head" title="${esc(cal.enrol||'')} · ${esc(cal.results||'')}">
+        <span class="sem-label">${sem.year} ${sem.semester}</span>
+        <span class="sem-cal">${cal.label||''}</span>
+        <span class="sem-cr">${sem.credits}cr</span>
+        <div class="sem-bar"><div class="sem-bar-fill" style="width:${pct}%"></div></div>
+        ${warnHtml}
+        ${markBtn}
+      </div>
+      <div class="sem-courses" id="sem-${sem.year}-${sem.semester}"></div>`;
+
+    const grid = block.querySelector('.sem-courses');
+    sem.courses.forEach(c => {
+      const isFiller = fillerCodes.has(c.code);
+      const isShared = sharedCodes.has(c.code);
+      const card = document.createElement('div');
+      card.className = `course-card${isFiller?' filler':''}`;
+      card.onclick = () => openDrawer(c.code);
+
+      const badge = isShared
+        ? `<span class="shared-badge">×2</span>`
+        : isFiller
+          ? `<span class="filler-badge">elective</span>`
+          : '';
+
+      const levelCls = c.level >= 300 ? 'amber' : c.level >= 200 ? '' : '';
+      card.innerHTML = `
+        ${badge}
+        <div class="course-code">${c.code}</div>
+        <div class="course-title">${esc(c.title)}</div>
+        <div class="course-meta">
+          <span class="course-level-badge">${c.level ? 'L'+c.level : ''}</span>
+          <span>${c.credits}cr</span>
+          ${c.offered_semesters?.length ? `<span>${c.offered_semesters.join('/')}</span>` : ''}
+        </div>`;
+      grid.appendChild(card);
+    });
+
+    semsWrap.appendChild(block);
+  });
+  main.appendChild(semsWrap);
+}
+
+function renderProgressBar(container, meta, totalPlanned) {
+  const target = meta.degree_target || 360;
+  const completed = meta.credits_prior || 0;
+  const transfer  = meta.credits_transfer || 0;
+  const planned   = (meta.credits_planned || 0) + transfer;
+  const compPct   = Math.min(100, ((completed) / target) * 100);
+  const planPct   = Math.min(100 - compPct, (planned / target) * 100);
+
+  const el = document.createElement('div');
+  el.className = 'progress-wrap';
+  el.innerHTML = `
+    <div class="progress-labels">
+      <span>Degree progress</span>
+      <strong>${Math.round(totalPlanned)}cr / ${target}cr</strong>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill-completed" style="width:${compPct}%"></div>
+      <div class="progress-fill-planned" style="width:${planPct}%"></div>
+    </div>
+    <div class="progress-legend">
+      <span><span class="legend-dot" style="background:var(--green)"></span>Completed (${completed}cr)</span>
+      <span><span class="legend-dot" style="background:rgba(82,183,136,0.4)"></span>Planned (${planned}cr)</span>
+    </div>`;
+  container.appendChild(el);
+}
+
+// ── Validation panel ──────────────────────────────────────────────────────────
+
+async function renderValidationPanel(container, req) {
+  const panel = document.createElement('div');
+  panel.className = 'val-panel';
+  panel.innerHTML = `
+    <div class="val-header" onclick="toggleVal(this)">
+      <span class="val-badge" id="val-badge">…</span>
+      <span class="val-title">Degree requirements check</span>
+      <span class="val-chevron">▼</span>
+    </div>
+    <div class="val-body" id="val-body"></div>`;
+  container.appendChild(panel);
+
+  try {
+    const res = await fetch(`${API}/plan/validate`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(req)
+    });
+    const data = await res.json();
+    const badge = panel.querySelector('#val-badge');
+    const body  = panel.querySelector('#val-body');
+    // API returns data.passed and data.checklist (tree node, not array)
+    if (data.passed) {
+      badge.className = 'val-badge pass'; badge.textContent = 'PASS';
+    } else {
+      badge.className = 'val-badge fail'; badge.textContent = 'ISSUES';
+    }
+    const root = data.checklist;
+    if (root) {
+      // Flatten top-level all_of children for cleaner display
+      const nodes = (root.type === 'all_of' && root.children) ? root.children : [root];
+      body.innerHTML = nodes.map(n => renderCheckNode(n)).join('');
+    } else {
+      body.innerHTML = '<div style="color:var(--ink3);font-size:12px;padding:8px">No validation data.</div>';
+    }
+  } catch(e) {
+    panel.querySelector('#val-badge').textContent = '?';
+  }
+}
+
+function renderCheckNode(node, depth) {
+  depth = depth || 0;
+  if (!node) return '';
+  const passed = node.passed !== false;
+  // Build human label from node type + description
+  let lbl = '';
+  if (node.type === 'course') {
+    lbl = node.label || node.description || node.code || '';
+  } else if (node.type === 'choose_credits') {
+    lbl = node.label || node.description || 'Elective pool';
+  } else if (node.type === 'total_credits') {
+    lbl = node.label || node.description || 'Total credits';
+  } else {
+    lbl = node.label || node.description || '';
+  }
+  const childHtml = (node.children && node.children.length && depth < 2)
+    ? `<div class="check-children">${node.children.slice(0,8).map(c => renderCheckNode(c, depth+1)).join('')}${node.children.length > 8 ? `<div class="check-item"><span class="check-icon" style="color:var(--ink3)">…</span><div class="check-label" style="color:var(--ink3)">${node.children.length - 8} more</div></div>` : ''}</div>`
+    : '';
+  return `<div class="check-item">
+    <span class="check-icon ${passed?'check-pass':'check-fail'}">${passed?'✓':'✗'}</span>
+    <div>
+      <div class="check-label">${esc(lbl)}</div>
+      ${childHtml}
+    </div>
+  </div>`;
+}
+
+function toggleVal(header) {
+  header.classList.toggle('open');
+  const body = document.getElementById('val-body');
+  body.classList.toggle('open');
+}
+
+// ── Course drawer ─────────────────────────────────────────────────────────────
+
+async function openDrawer(code) {
+  const overlay = document.getElementById('overlay');
+  const drawer  = document.getElementById('drawer');
+  const content = document.getElementById('drawer-content');
+  content.innerHTML = `<div class="loading-wrap" style="height:200px"><div class="spinner"></div></div>`;
+  overlay.classList.add('open');
+  drawer.classList.add('open');
+
+  try {
+    const res = await fetch(`${API}/courses/${code}`);
+    if (!res.ok) { content.innerHTML = `<p style="color:var(--red)">Course not found.</p>`; return; }
+    const c = await res.json();
+
+    const levelLbl = c.level ? `L${c.level}` : '';
+    const offeringHtml = c.offerings?.map(o =>
+      `<span class="offering-pill">${o.campus}/${o.mode}/${o.semester}</span>`
+    ).join('') || '<span style="color:var(--ink3);font-size:12px">No offerings listed</span>';
+
+    let prereqHtml = '<span style="color:var(--ink3);font-size:12px">None</span>';
+    if (c.prerequisite_expression) {
+      prereqHtml = `<div class="prereq-tree">${renderPrereqExpr(c.prerequisite_expression)}</div>`;
+    }
+
+    content.innerHTML = `
+      <div class="drawer-code">${c.code}</div>
+      <div class="drawer-title">${esc(c.title)}</div>
+      <div class="drawer-badges">
+        ${levelLbl ? `<span class="badge green">${levelLbl}</span>` : ''}
+        <span class="badge">${c.credits}cr</span>
+        ${c.subject ? `<span class="badge">${esc(c.subject)}</span>` : ''}
+      </div>
+      ${c.description ? `<div class="drawer-section"><h4>About</h4><div class="drawer-desc">${esc(c.description)}</div></div>` : ''}
+      <div class="drawer-section"><h4>Offerings</h4><div class="offering-pills">${offeringHtml}</div></div>
+      <div class="drawer-section"><h4>Prerequisites</h4>${prereqHtml}</div>
+      ${c.restrictions?.length ? `<div class="drawer-section"><h4>Restrictions</h4><div class="prereq-tree">${c.restrictions.join(', ')}</div></div>` : ''}
+      <div class="drawer-section">
+        <h4>Links</h4>
+        <a href="https://www.massey.ac.nz/study/all-qualifications-and-degrees/" target="_blank" rel="noopener" class="btn-sm" style="display:inline-block;text-decoration:none">
+          Massey catalogue ↗
+        </a>
+      </div>`;
+  } catch(e) {
+    content.innerHTML = `<p style="color:var(--red)">Failed to load course.</p>`;
+  }
+}
+
+function renderPrereqExpr(expr) {
+  if (!expr) return '<span style="color:var(--ink3)">None</span>';
+  if (typeof expr === 'string') {
+    return `<a class="pnode-code" onclick="closeDrawer();setTimeout(()=>openDrawer('${expr}'),200)" href="#">${expr}</a>`;
+  }
+  if (expr.op === 'AND' || expr.op === 'OR') {
+    const sep = `<span class="pnode-op">${expr.op}</span>`;
+    return expr.args.map(a => renderPrereqExpr(a)).join(sep);
+  }
+  if (typeof expr === 'object' && expr.code) {
+    return `<a class="pnode-code" onclick="closeDrawer();setTimeout(()=>openDrawer('${expr.code}'),200)" href="#">${expr.code}</a>`;
+  }
+  return `<span style="color:var(--ink3)">${esc(JSON.stringify(expr))}</span>`;
+}
+
+function closeDrawer() {
+  document.getElementById('overlay').classList.remove('open');
+  document.getElementById('drawer').classList.remove('open');
+}
+
+// ── Course modal ──────────────────────────────────────────────────────────────
+
+async function openCourseModal() {
+  document.getElementById('course-modal').classList.add('open');
+  document.getElementById('modal-q').value = '';
+  document.getElementById('modal-q').focus();
+  if (!modalCache) {
+    document.getElementById('modal-results').innerHTML = `<div class="modal-empty"><div class="spinner" style="margin:0 auto 8px"></div>Loading…</div>`;
+    try {
+      const campus = document.getElementById('campus').value;
+      const mode   = document.getElementById('mode').value;
+      const res = await fetch(`${API}/courses?campus=${campus}&mode=${mode}&limit=2000`);
+      const data = await res.json();
+      modalCache = data.courses || [];
+    } catch(e) { modalCache = []; }
+  }
+  renderModalResults('');
+}
+
+function closeCourseModal() {
+  document.getElementById('course-modal').classList.remove('open');
+}
+
+let modalSearchTimer = null;
+function modalSearch(q) {
+  clearTimeout(modalSearchTimer);
+  modalSearchTimer = setTimeout(() => renderModalResults(q), 120);
+}
+
+function setModalLevel(el, lvl) {
+  document.querySelectorAll('.f-pill').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  modalLevel = lvl;
+  renderModalResults(document.getElementById('modal-q').value);
+}
+
+function renderModalResults(q) {
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered = (modalCache||[]).filter(c => {
+    const text = `${c.code} ${c.title}`.toLowerCase();
+    const wordOk = !words.length || words.every(w => text.includes(w));
+    const levelOk = !modalLevel || (
+      modalLevel === '700' ? c.level >= 700
+                           : Math.floor(c.level/100)*100 === parseInt(modalLevel)
+    );
+    return wordOk && levelOk;
+  });
+
+  document.getElementById('modal-count').textContent =
+    `${filtered.length.toLocaleString()} courses${q ? ' matching "'+q+'"' : ''}`;
+
+  const shown = filtered.slice(0, 200);
+  if (!shown.length) {
+    document.getElementById('modal-results').innerHTML = `<div class="modal-empty">No courses found.</div>`;
+    return;
+  }
+
+  document.getElementById('modal-results').innerHTML = shown.map(c => {
+    const sems = c.offerings?.map(o=>o.semester).filter((v,i,a)=>a.indexOf(v)===i).join('/') || '';
+    return `<div class="modal-row" onclick="closeCourseModal();openDrawer('${c.code}')">
+      <span class="modal-code">${c.code}</span>
+      <span class="modal-title">${esc(c.title)}</span>
+      <span class="modal-cr">${c.credits}cr</span>
+      <span class="modal-sem">${sems}</span>
+    </div>`;
+  }).join('') + (filtered.length > 200 ? `<div class="modal-empty">Showing 200 of ${filtered.length} - refine search</div>` : '');
+}
+
+// ── Mark semester done ────────────────────────────────────────────────────────
+
+function markDone(codes) {
+  codes.forEach(c => addTag('completed-wrap', c));
+  toast(`${codes.length} courses marked as completed.`);
+}
+
+// ── Saved plans ───────────────────────────────────────────────────────────────
+
+function getSaved() {
+  try { return JSON.parse(localStorage.getItem('cm_saved_plans')||'[]'); }
+  catch(e) { return []; }
+}
+
+function setSaved(plans) {
+  localStorage.setItem('cm_saved_plans', JSON.stringify(plans));
+}
+
+function renderSavedPlans() {
+  const list = document.getElementById('saved-list');
+  const plans = getSaved();
+  if (!plans.length) {
+    list.innerHTML = `<div class="saved-empty">No saved plans yet.</div>`;
+    return;
+  }
+  list.innerHTML = plans.map((p, i) => `
+    <div class="saved-item" onclick="loadSaved(${i})">
+      <span class="saved-name">${esc(p.name)}</span>
+      <span class="saved-meta">${p.credits||'?'}cr</span>
+      <div class="saved-actions">
+        <button class="saved-btn" onclick="event.stopPropagation();deleteSaved(${i})" title="Delete">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+function promptSave() {
+  document.getElementById('save-row').style.display = 'flex';
+  document.getElementById('save-name').value = '';
+  document.getElementById('save-name').focus();
+  document.getElementById('btn-save').style.display = 'none';
+}
+
+function cancelSave() {
+  document.getElementById('save-row').style.display = 'none';
+  document.getElementById('btn-save').style.display = '';
+}
+
+function commitSave() {
+  const name = document.getElementById('save-name').value.trim();
+  if (!name || !currentPlan) return;
+  const plans = getSaved();
+  const meta = currentPlan.response.meta;
+  plans.unshift({
+    name,
+    credits: meta.credits_planned + meta.credits_prior + meta.credits_transfer,
+    major: meta.major,
+    request: currentPlan.request,
+    savedAt: new Date().toISOString(),
+  });
+  setSaved(plans);
+  cancelSave();
+  renderSavedPlans();
+  toast('Plan saved.');
+}
+
+async function loadSaved(i) {
+  const plan = getSaved()[i];
+  if (!plan?.request) return;
+  const req = plan.request;
+
+  document.getElementById('major-input').value = req.major || '';
+  document.getElementById('double-input').value = req.double_major || '';
+  document.getElementById('start-year').value = req.start_year || 2026;
+  document.getElementById('start-sem').value = req.start_semester || 'S1';
+  document.getElementById('max-credits').value = req.max_credits || 60;
+  document.getElementById('campus').value = req.campus || 'D';
+  document.getElementById('mode').value = req.mode || 'DIS';
+  document.getElementById('transfer').value = req.transfer_credits || 0;
+  document.getElementById('no-summer').checked = !!req.no_summer;
+  document.getElementById('auto-fill').checked = !!req.auto_fill;
+
+  // Restore tags
+  ['completed-wrap','prefer-wrap','exclude-wrap'].forEach(id => {
+    document.querySelectorAll(`#${id} .tag`).forEach(t => t.remove());
+  });
+  (req.completed||[]).forEach(c => addTag('completed-wrap',c));
+  (req.prefer||[]).forEach(c => addTag('prefer-wrap',c));
+  (req.exclude||[]).forEach(c => addTag('exclude-wrap',c));
+
+  generatePlan();
+}
+
+function deleteSaved(i) {
+  const plans = getSaved();
+  plans.splice(i, 1);
+  setSaved(plans);
+  renderSavedPlans();
+}
+
+// ── URL state ─────────────────────────────────────────────────────────────────
+
+function pushUrl(req) {
+  const p = new URLSearchParams();
+  if (req.major)          p.set('major', req.major);
+  if (req.double_major)   p.set('dm', req.double_major);
+  if (req.start_year)     p.set('year', req.start_year);
+  if (req.start_semester) p.set('sem', req.start_semester);
+  if (req.max_credits)    p.set('cr', req.max_credits);
+  if (req.campus)         p.set('campus', req.campus);
+  if (req.mode)           p.set('mode', req.mode);
+  if (req.no_summer)      p.set('nosummer', '1');
+  if (req.auto_fill)      p.set('fill', '1');
+  if (req.transfer_credits) p.set('transfer', req.transfer_credits);
+  if (req.completed?.length) p.set('done', req.completed.join(','));
+  if (req.prefer?.length)    p.set('prefer', req.prefer.join(','));
+  if (req.exclude?.length)   p.set('exclude', req.exclude.join(','));
+  history.replaceState(null,'',`?${p.toString()}`);
+}
+
+function restoreFromUrl() {
+  const p = new URLSearchParams(location.search);
+  if (p.get('major')) document.getElementById('major-input').value = p.get('major');
+  if (p.get('dm'))    document.getElementById('double-input').value = p.get('dm');
+  if (p.get('year'))  document.getElementById('start-year').value = p.get('year');
+  if (p.get('sem'))   document.getElementById('start-sem').value = p.get('sem');
+  if (p.get('cr'))    document.getElementById('max-credits').value = p.get('cr');
+  if (p.get('campus')) document.getElementById('campus').value = p.get('campus');
+  if (p.get('mode'))   document.getElementById('mode').value = p.get('mode');
+  if (p.get('nosummer')) document.getElementById('no-summer').checked = true;
+  if (p.get('fill'))     document.getElementById('auto-fill').checked = true;
+  if (p.get('transfer')) document.getElementById('transfer').value = p.get('transfer');
+  if (p.get('done'))     p.get('done').split(',').filter(Boolean).forEach(c => addTag('completed-wrap',c));
+  if (p.get('prefer'))   p.get('prefer').split(',').filter(Boolean).forEach(c => addTag('prefer-wrap',c));
+  if (p.get('exclude'))  p.get('exclude').split(',').filter(Boolean).forEach(c => addTag('exclude-wrap',c));
+
+  if (p.get('major')) setTimeout(() => generatePlan(), 300);
+}
+
+function copyLink() {
+  navigator.clipboard.writeText(location.href).then(() => toast('Share link copied!'));
+}
+
+// ── Downloads ─────────────────────────────────────────────────────────────────
+
+function downloadJson() {
+  if (!currentPlan) return;
+  const blob = new Blob([JSON.stringify(currentPlan.response, null, 2)], {type:'application/json'});
+  dlBlob(blob, 'coursemap-plan.json');
+}
+
+async function downloadIcal() {
+  if (!currentPlan) return;
+  try {
+    const res = await fetch(`${API}/plan/ical`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(currentPlan.request)
+    });
+    if (!res.ok) { toast('iCal generation failed.'); return; }
+    const blob = await res.blob();
+    dlBlob(blob, 'coursemap-plan.ics');
+  } catch(e) { toast('Network error.'); }
+}
+
+function downloadHtml() {
+  if (!currentPlan) return;
+  const plan = currentPlan.response;
+  const meta = plan.meta;
+  const sems = plan.semesters;
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>coursemap - ${escHtml(meta.major)}</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;background:#f9f9f7;color:#1a1a18}
+  h1{font-size:24px;margin:0 0 4px}
+  .sub{font-size:12px;color:#666;margin-bottom:1.5rem}
+  .sem{margin-bottom:1.5rem;border:1px solid #ddd;border-radius:8px;overflow:hidden}
+  .sem-head{background:#f0f0ec;padding:8px 14px;font-weight:500;font-size:13px;display:flex;gap:12px;border-bottom:1px solid #ddd}
+  .sem-label{font-weight:600}
+  .sem-cr{color:#666}
+  table{width:100%;border-collapse:collapse}
+  td{padding:7px 14px;font-size:12px;border-bottom:1px solid #eee}
+  tr:last-child td{border-bottom:none}
+  .code{font-family:monospace;color:#2a5c45}
+  .elective{color:#888;font-size:10px}
+  .disclaimer{font-size:11px;color:#888;margin-top:2rem;padding:10px;background:#fff3e0;border-radius:6px}
+</style>
+</head>
+<body>
+<h1>${escHtml(meta.major)}</h1>
+<div class="sub">Generated by coursemap · ${meta.start_year} ${meta.start_semester} · ${meta.campus}/${meta.mode} · ${meta.credits_planned + meta.credits_prior}cr</div>
+${sems.map(s => `
+<div class="sem">
+  <div class="sem-head">
+    <span class="sem-label">${s.year} ${s.semester}</span>
+    <span class="sem-cr">${s.credits}cr</span>
+  </div>
+  <table>${s.courses.map(c => `
+    <tr>
+      <td class="code">${c.code}</td>
+      <td>${escHtml(c.title)}${plan.filler_codes?.includes(c.code)?'<span class="elective"> · elective</span>':''}</td>
+      <td>${c.credits}cr</td>
+    </tr>`).join('')}
+  </table>
+</div>`).join('')}
+<div class="disclaimer">⚠ This plan is generated by coursemap, an unofficial tool. Always verify with Massey University's official programme information and your academic advisor.</div>
+</body></html>`;
+  dlBlob(new Blob([html],{type:'text/html'}), 'coursemap-plan.html');
+}
+
+function dlBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), {href:url, download:filename});
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Mobile sidebar ────────────────────────────────────────────────────────────
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-backdrop').classList.toggle('open');
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('open');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) { return esc(s); }
+function escHtml(s) { return esc(s); }
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
