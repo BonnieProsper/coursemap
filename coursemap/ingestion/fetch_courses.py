@@ -90,6 +90,10 @@ def discover_courses() -> list[dict]:
                 "subjects":     r.get("subject_areas"),
                 "intro":        _safe(r.get("intro")),
                 "offerings":    _parse_offerings_json(r.get("offerings_json")),
+                # Placeholders: build_dataset.py overwrites these with real
+                # values from prerequisite_scraper.scrape_all right after
+                # discover_courses() returns. A course dict from this
+                # function alone always has empty relation fields.
                 "prerequisites":  [],
                 "corequisites":   [],
                 "restrictions":   [],

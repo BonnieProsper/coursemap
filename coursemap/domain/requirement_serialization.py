@@ -17,7 +17,6 @@ from .requirement_nodes import (
     RequirementNode,
     TotalCreditsRequirement,
 )
-from .requirement_utils import collect_course_codes
 
 
 def requirement_to_dict(node: RequirementNode) -> dict:

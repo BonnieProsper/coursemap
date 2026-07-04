@@ -11,7 +11,7 @@ Each semester block contains:
   published academic calendar (Semester 1 starts late February, Semester 2
   starts mid-July, Summer School starts late November).
 
-The dates are representative only - Massey's exact enrolment dates vary
+The dates are representative only. Massey's exact enrolment dates vary
 by year. Students should check massey.ac.nz for official dates.
 """
 from __future__ import annotations
@@ -30,9 +30,9 @@ from coursemap.domain.plan import DegreePlan
 # "SS" = Summer School (straddling Nov/Dec of year N into Feb of year N+1).
 
 _SEMESTER_START: dict[str, tuple[int, int]] = {
-    "S1": (2, 24),   # late February
-    "S2": (7, 14),   # mid-July
-    "SS": (11, 25),  # late November
+    "S1": (2, 23),   # late February, matches Massey's published 2026 key dates
+    "S2": (7, 13),   # mid-July, matches Massey's published 2026 key dates
+    "SS": (11, 16),  # mid-November (varies by college; COCA starts ~2 weeks earlier)
 }
 
 _SEMESTER_WEEKS: dict[str, int] = {

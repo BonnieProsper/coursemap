@@ -26,7 +26,7 @@ def search_minors(query: str, minors: list[dict]) -> list[dict]:
     """
     Return minors matching the query string.
 
-    Matches against the minor name. Supports partial word matching - each
+    Matches against the minor name. Supports partial word matching. Each
     whitespace-separated word in the query must appear somewhere in the name.
     Falls back to substring matching if no word-match results are found.
     Case-insensitive.

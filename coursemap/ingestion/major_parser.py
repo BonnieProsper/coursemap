@@ -118,7 +118,7 @@ def parse_major_page(html: str) -> dict[str, Any]:
                     required_codes.append(code)
 
     # ------------------------------------------------------------------
-    # Step 3: Fallback - scan all <li><a href="/study/courses/XXXXXX/">
+    # Step 3: fallback, scan all <li><a href="/study/courses/XXXXXX/">
     # Used when no planning block found (postgrad, older layouts).
     # ------------------------------------------------------------------
     if not required_codes:
@@ -136,7 +136,7 @@ def parse_major_page(html: str) -> dict[str, Any]:
     # ------------------------------------------------------------------
     # Build tree: required COURSE nodes + elective CHOOSE_CREDITS nodes.
     # Courses that appear in elective pools are excluded from the required
-    # list - the planner will select them as electives instead.
+    # list. The planner will select them as electives instead.
     # ------------------------------------------------------------------
     elective_pool_codes: set[str] = set()
     for e in elective_children:

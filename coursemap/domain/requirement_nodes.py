@@ -53,20 +53,15 @@ class ChooseCreditsRequirement(RequirementNode):
     """
     Choose courses totaling a specified credit amount from a list.
 
-    When ``course_codes`` is empty AND ``open_pool=True``, this represents an
-    unrestricted free-elective requirement (e.g. "choose any 150cr of Massey
-    courses") rather than an impossible-to-satisfy pool with zero options.
-    This distinction matters: an empty `course_codes` tuple is ambiguous on
-    its own (it could mean "no eligible courses exist" or "any course is
-    eligible"), so `open_pool` makes the intended meaning explicit instead of
-    relying on callers to infer it from context.
+    When ``course_codes`` is empty and ``open_pool=True``, this represents an
+    unrestricted free-elective requirement ("choose any 150cr") rather than
+    an impossible pool with zero options. The flag makes that distinction
+    explicit rather than inferring it from an empty list.
 
-    For an open pool, satisfaction is judged by counting credits from any
-    course in the plan that isn't already claimed by a more specific
-    requirement elsewhere in the tree. Since this node has no way to know
-    what else the tree requires, `is_satisfied` approximates by counting
-    credits from courses NOT in `excluded_codes` (courses already counted by
-    other parts of the tree) - set by the caller before checking.
+    For an open pool, satisfaction counts credits from any plan course not
+    in `excluded_codes` (set by the caller to courses already claimed
+    elsewhere in the tree, since this node has no visibility into the rest
+    of the tree on its own).
     """
 
     credits: int

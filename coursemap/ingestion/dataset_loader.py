@@ -114,7 +114,7 @@ def _validate_courses_schema(raw: Any) -> None:
             f"got {type(raw).__name__}. Re-run ingestion to regenerate."
         )
     if len(raw) == 0:
-        raise ValueError("courses.json: array is empty - dataset may be corrupted.")
+        raise ValueError("courses.json: array is empty. Dataset may be corrupted.")
     required_keys = {"course_code", "title"}
     for i, entry in enumerate(raw[:5]):   # sample first 5 entries
         if not isinstance(entry, dict):
@@ -148,7 +148,7 @@ def _validate_majors_schema(raw: Any) -> None:
         )
     if isinstance(raw, list):
         if len(raw) == 0:
-            raise ValueError("majors.json: array is empty - dataset may be corrupted.")
+            raise ValueError("majors.json: array is empty. Dataset may be corrupted.")
         for i, entry in enumerate(raw[:3]):
             if not isinstance(entry, dict):
                 raise ValueError(
@@ -161,7 +161,7 @@ def _validate_majors_schema(raw: Any) -> None:
                 )
     else:  # dict format
         if len(raw) == 0:
-            raise ValueError("majors.json: object is empty - dataset may be corrupted.")
+            raise ValueError("majors.json: object is empty. Dataset may be corrupted.")
 
 
 def normalize_campus(raw: str) -> str:
@@ -505,7 +505,7 @@ def load_courses() -> dict[str, Course]:
             item.get("prerequisites"),
             own_code=code,
             own_level=own_level,
-            level_map=None,  # skip plausibility filter - data is pre-cleaned
+            level_map=None,  # skip plausibility filter, data is pre-cleaned
         )
         # Still strip any phantom codes that somehow survived repair.
         prereq_expr = _strip_phantom_prereqs(prereq_expr, known_codes)
@@ -522,7 +522,7 @@ def load_courses() -> dict[str, Course]:
             else:
                 credits = int(float(raw_credits))
                 if credits <= 0:
-                    # Keep as 0 - the scheduler will skip zero-credit courses
+                    # Keep as 0, the scheduler will skip zero-credit courses
                     credits = 0
 
             course = Course(

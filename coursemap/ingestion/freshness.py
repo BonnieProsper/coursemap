@@ -76,11 +76,11 @@ def freshness_report(threshold_days: int = STALE_THRESHOLD_DAYS) -> dict:
     """
     Return a freshness report dict with the following keys:
 
-        scrape_date:   date | None   - when datasets were last scraped
-        age_days:      int | None    - days since scrape (None if unknown)
-        is_stale:      bool          - True if age > threshold_days
+        scrape_date:   date | None   : when datasets were last scraped
+        age_days:      int | None    : days since scrape (None if unknown)
+        is_stale:      bool          : True if age > threshold_days
         threshold_days: int
-        message:       str           - human-readable summary
+        message:       str           : human-readable summary
 
     The report is also logged at WARNING level when the data is stale.
     """
@@ -93,7 +93,7 @@ def freshness_report(threshold_days: int = STALE_THRESHOLD_DAYS) -> dict:
             "age_days":        None,
             "is_stale":        False,
             "threshold_days":  threshold_days,
-            "message":         "Dataset scrape date unknown - no timestamp in courses.json.",
+            "message":         "Dataset scrape date unknown. No timestamp in courses.json.",
         }
 
     age_days = (today - scrape_date).days
@@ -107,7 +107,7 @@ def freshness_report(threshold_days: int = STALE_THRESHOLD_DAYS) -> dict:
         )
         logger.warning(msg)
     else:
-        msg = f"Dataset scraped {scrape_date} ({age_days} days ago) - within the {threshold_days}-day freshness window."
+        msg = f"Dataset scraped {scrape_date} ({age_days} days ago), within the {threshold_days}-day freshness window."
 
     return {
         "scrape_date":    str(scrape_date),

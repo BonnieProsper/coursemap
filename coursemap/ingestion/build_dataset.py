@@ -10,8 +10,9 @@ Writes:
     datasets/qualifications.json  -- 176 qualification records
     datasets/specialisations.json -- 380 specialisation (major) records
 
-Prerequisites are scraped separately via prerequisite_scraper, then merged
-into courses.json by this script.
+Prerequisites, restrictions, and corequisites are scraped separately via
+prerequisite_scraper (one page fetch per course covers all three), then
+merged into courses.json by this script.
 """
 from __future__ import annotations
 import json
@@ -32,10 +33,13 @@ def build_dataset() -> None:
     logger.info("Fetching courses...")
     courses = discover_courses()
 
-    logger.info("Scraping prerequisites for %d courses...", len(courses))
-    prereqs = scrape_all(courses)
+    logger.info("Scraping prerequisites, restrictions, and corequisites for %d courses...", len(courses))
+    relations = scrape_all(courses)
     for course in courses:
-        course["prerequisites"] = prereqs.get(course["course_code"], [])
+        rel = relations.get(course["course_code"], {})
+        course["prerequisites"] = rel.get("prerequisites")
+        course["restrictions"] = rel.get("restrictions", [])
+        course["corequisites"] = rel.get("corequisites", [])
 
     logger.info("Fetching qualifications and specialisations...")
     quals, specs = discover_qualifications()

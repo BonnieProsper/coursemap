@@ -70,7 +70,7 @@ class OrExpression(PrerequisiteExpression):
         """
         Return ALL codes mentioned in any branch (union).
 
-        WARNING: this is NOT "all codes that must be completed" - for an OR
+        WARNING: this is NOT "all codes that must be completed". For an OR
         expression, only ONE branch needs to be satisfied. Callers that need
         "which codes are truly required" should use _prereq_codes_or_aware()
         from planner/generator.py or ElectiveFiller._prereqs_satisfiable(),

@@ -209,8 +209,8 @@ def select_free_electives(
     candidates.sort()
 
     # Two-pass selection:
-    # Pass 1 - preferred and prefix-matching courses in sort order (best fit first).
-    # Pass 2 - if still under gap, add remaining courses sorted by credits ascending
+    # Pass 1: preferred and prefix-matching courses in sort order (best fit first).
+    # Pass 2: if still under gap, add remaining courses sorted by credits ascending
     #           (smallest first) so we can pack the gap precisely.
     selected: list[tuple[int, str, str]] = []
     selected_codes: set[str] = set()
@@ -222,7 +222,7 @@ def select_free_electives(
         cr = courses[code].credits
         # Skip courses that would push us too far over the gap.
         # Allow a single course to exceed the gap by at most one course worth
-        # of credits (15cr typically) - this prevents the selector getting stuck
+        # of credits (15cr typically). This prevents the selector getting stuck
         # just under the gap when only larger courses are left.
         if running + cr > gap + 30:
             continue
