@@ -1,15 +1,15 @@
-# CourseMap - Student Guide
+# CourseMap: Student Guide
 
 **CourseMap** is an unofficial degree planner for Massey University. It generates semester-by-semester course schedules based on your chosen major, campus, and study preferences.
 
-> ⚠️ **This tool is not affiliated with Massey University.** Always verify your plan with [official Massey programme information](https://www.massey.ac.nz/study/) and your academic advisor before enrolling.
+> **This tool is not affiliated with Massey University.** Always verify your plan with [official Massey programme information](https://www.massey.ac.nz/study/) and your academic advisor before enrolling.
 
 ---
 
 ## Quick Start
 
 ```bash
-cd coursemap_v4
+cd coursemap
 pip install -r requirements.txt
 python -m uvicorn coursemap.api.server:app --reload --port 8000
 ```
@@ -39,12 +39,12 @@ Type your major name in the search box. Use the filter pills (Bachelor, Honours,
 | **Double major** | Add a second major to share courses |
 
 ### 3. Personalise
-- **Already completed** - Add courses you've already passed (removes them from the plan)
-- **Preferred electives** - Course codes you want the planner to prioritise for free electives
-- **Exclude** - Course codes to never include
+- **Already completed**: Add courses you've already passed (removes them from the plan)
+- **Preferred electives**: Course codes you want the planner to prioritise for free electives
+- **Exclude**: Course codes to never include
 
 ### 4. Add a minor (beta)
-Select a minor from the dropdown. The planner will add its key courses to your preferred electives list. Minor scheduling is approximate - verify with Massey.
+Select a minor from the dropdown. The planner will add its key courses to your preferred electives list. Minor scheduling is approximate, verify with Massey.
 
 ### 5. Generate and review
 Click **Generate plan**. Review each semester. Click any course card to see:
@@ -60,18 +60,18 @@ Click **Generate plan**. Review each semester. Click any course card to see:
 ### Course card badges
 | Badge | Meaning |
 |---|---|
-| `elective ↔` | Free elective - swap for any course at the same level |
+| `elective ↔` | Free elective, swap for any course at the same level |
 | `×2` | Shared course (counts toward both majors in a double major) |
-| `?` (amber circle) | **Offering not confirmed for 2026** - verify availability at Massey |
+| `?` (amber circle) | **Offering not confirmed for 2026**, verify availability at Massey |
 | 🟢 dot | Prerequisites appear to be met |
-| 🔴 dot | Prerequisites may be missing - check before enrolling |
+| 🔴 dot | Prerequisites may be missing, check before enrolling |
 
 ### Stats panel
-- **Semesters** - Total scheduled semesters
-- **Credits planned** - Total course credits in your plan
-- **Degree target** - Credits required for your qualification
-- **Elective gap** - Credits not yet assigned (enable Auto-fill to resolve)
-- **Est. total fees** - Rough estimate using 2026 rates by subject area. **Not guaranteed.**
+- **Semesters**: Total scheduled semesters
+- **Credits planned**: Total course credits in your plan
+- **Degree target**: Credits required for your qualification
+- **Elective gap**: Credits not yet assigned (enable Auto-fill to resolve)
+- **Est. total fees**: Rough estimate using 2026 rates by subject area. **Not guaranteed.**
 
 ### Fee estimates
 Fees are estimated using Massey's published 2026 rate ranges, divided by credit value and adjusted per subject area. They are approximate only. Use the [Massey fee estimator](https://www.massey.ac.nz/fees) for exact figures.
@@ -114,7 +114,7 @@ Minor support is approximate. The planner adds minor courses to your preferred e
 
 ---
 
-## Before You Enrol - Checklist
+## Before You Enrol: Checklist
 
 1. ☐ Verify programme requirements at [massey.ac.nz/study](https://www.massey.ac.nz/study/)
 2. ☐ Check prerequisites for every L200+ course manually

@@ -100,5 +100,5 @@ cp datasets/majors.json  /path/to/deployment/datasets/
 docker build -t coursemap .
 docker push coursemap:latest
 
-# The server hot-reloads datasets on startup - restart the container.
+# The server hot-reloads datasets on startup, restart the container.
 ```
