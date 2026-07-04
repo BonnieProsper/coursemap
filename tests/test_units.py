@@ -195,7 +195,7 @@ class TestCheckCredits:
         assert not errors
 
     def test_zero_credits_is_warning_not_error(self):
-        """Zero-credit courses are known non-schedulable entries - downgraded to warning."""
+        """Zero-credit courses are known non-schedulable entries, downgraded to warning."""
         courses = {"A": _course("A", credits=0)}
         errors, warnings = [], []
         _check_credits(courses, errors, warnings)
@@ -715,6 +715,11 @@ class TestRebalance:
         The greedy pass correctly puts A in S2 yr1 and B in S2 yr2.
         Pass 3 would merge them (combined 30cr <= 60cr cap, same type),
         but must not because B.prereqs ∩ pen_codes = {A}.
+
+        enforce_level_progression=False: B is a synthetic L200 course with
+        only 15cr of L100 behind it (this fixture predates the 45cr
+        progression rule and isn't testing it). Without disabling it here,
+        the real rule would correctly block B for an unrelated reason.
         """
         from coursemap.domain.prerequisite import CoursePrerequisite
         courses = {
@@ -724,7 +729,7 @@ class TestRebalance:
                 prerequisites=CoursePrerequisite("A"),
             ),
         }
-        gen = PlanGenerator(courses, max_credits_per_semester=60)
+        gen = PlanGenerator(courses, max_credits_per_semester=60, enforce_level_progression=False)
         plan = gen.generate()
 
         assert len(plan.semesters) == 2, (
@@ -789,7 +794,7 @@ class TestRebalance:
         gen = PlanGenerator(courses2, max_credits_per_semester=60)
         plan = gen.generate()
         # Both offered only in S2. Greedy: X in S2 yr1, Y in S2 yr1 (same semester).
-        # If they go into the same semester, fine - just assert total is right.
+        # If they go into the same semester, fine. Just assert total is right.
         assert plan.total_credits() == 30
         all_codes = {c.code for s in plan.semesters for c in s.courses}
         assert all_codes == {"X", "Y"}
@@ -800,7 +805,7 @@ class TestRebalance:
 # ---------------------------------------------------------------------------
 
 class TestDegreeRules:
-    """Tests for degree_rules.py - credit profile lookup and tree construction."""
+    """Tests for degree_rules.py: credit profile lookup and tree construction."""
 
     def test_profile_standard_bsc(self):
         """3-year Level 7 → 360cr with level constraints."""
@@ -872,6 +877,64 @@ class TestDegreeRules:
         )
         total_nodes = [c for c in tree.children if isinstance(c, TotalCreditsRequirement)]
         assert len(total_nodes) == 0
+
+    def test_build_degree_tree_does_not_yet_emit_level_constraints(self):
+        """
+        profile_for(7, 3) computes max_level_100=165 / min_level_300=75 correctly,
+        and ElectiveFiller is already distribution-aware (see
+        PlannerService._level_distribution_state), but build_degree_tree still
+        does not turn these into MaxLevelCreditsRequirement/
+        MinLevelCreditsRequirement nodes: doing so was tried twice and reverted
+        twice, most recently because it surfaced a separate pre-existing issue
+        in _select_electives's pool-budget accounting (see the NOTE in
+        degree_rules.build_degree_tree and DATA_QUALITY.md's "Level
+        Distribution" section). This test pins the current (safe, if
+        incomplete) behaviour so a future re-attempt has to consciously
+        update this test, not silently pass.
+        """
+        from coursemap.rules.degree_rules import build_degree_tree
+        from coursemap.domain.requirement_nodes import (
+            AllOfRequirement, CourseRequirement,
+            MaxLevelCreditsRequirement, MinLevelCreditsRequirement,
+        )
+        major_req = AllOfRequirement((CourseRequirement("111101"),))
+        tree = build_degree_tree(
+            major_req=major_req,
+            qual_level=7,
+            qual_length=3,
+            major_name="Test",
+            schedulable_major_credits=360,
+            force_total_credits=True,
+        )
+        assert not [c for c in tree.children if isinstance(c, MaxLevelCreditsRequirement)]
+        assert not [c for c in tree.children if isinstance(c, MinLevelCreditsRequirement)]
+
+    def test_max_level_credits_requirement_is_satisfied(self):
+        """
+        Unit test for MaxLevelCreditsRequirement.is_satisfied directly (the node
+        class itself is correct and already used wherever a caller constructs
+        a tree manually; build_degree_tree just doesn't emit one from a
+        profile automatically yet, see the test above).
+        """
+        from coursemap.domain.requirement_nodes import MaxLevelCreditsRequirement
+        from coursemap.domain.plan import DegreePlan, SemesterPlan
+        from coursemap.domain.course import Course
+
+        def _course(code, level, credits=15):
+            return Course(code=code, title=code, credits=credits, level=level, offerings=())
+
+        node = MaxLevelCreditsRequirement(level=100, max_credits=30)
+        under_limit = DegreePlan(semesters=(
+            SemesterPlan(year=1, semester="S1", courses=(_course("100101", 100),)),
+        ))
+        assert node.is_satisfied(under_limit) is True
+
+        over_limit = DegreePlan(semesters=(
+            SemesterPlan(year=1, semester="S1", courses=(
+                _course("100101", 100), _course("100102", 100), _course("100103", 100),
+            )),
+        ))
+        assert node.is_satisfied(over_limit) is False
 
     def test_filter_requirement_tree_drops_unschedulable_course(self):
         """CourseRequirement for a code not in schedulable_codes is removed."""
@@ -1029,7 +1092,7 @@ class TestRequirementSerialization:
 # ---------------------------------------------------------------------------
 
 class TestPlanScorer:
-    """Tests for PlanScorer - lower is better."""
+    """Tests for PlanScorer: lower is better."""
 
     def _make_plan(self, semester_credits: list[int]):
         """Build a DegreePlan with given per-semester credit loads."""

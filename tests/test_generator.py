@@ -218,7 +218,7 @@ def test_rebalance_merges_thin_final():
     final_cr = plan.semesters[-1].total_credits()
     # The final semester is allowed to be below REBALANCE_THRESHOLD if
     # it genuinely can't be filled (courses not offered in final sem type)
-    # - but for this setup with S1+S2 courses it should be non-trivial
+    # but for this setup with S1+S2 courses it should be non-trivial
     assert final_cr > 0
 
 
@@ -266,3 +266,67 @@ def test_generator_with_no_courses_raises():
     gen = _make_generator([])
     plan = gen.generate()
     assert len(plan.semesters) == 0
+
+
+def test_zero_credit_course_excluded_by_default():
+    """
+    A 0-credit course must NOT be scheduled by default. This preserves the
+    existing, deliberate behavior for 0-credit electives/pool members
+    (practicums, language enrollments) that would deadlock the scheduler's
+    credit-cap and rebalancing math if treated like a normal course.
+    """
+    normal = _make_course("REQ100", credits=15)
+    zero_cr = _make_course("ZCR100", credits=0)
+    gen = _make_generator([normal, zero_cr])
+    plan = gen.generate()
+    all_codes = [c.code for s in plan.semesters for c in s.courses]
+    assert "REQ100" in all_codes
+    assert "ZCR100" not in all_codes
+
+
+def test_required_zero_credit_course_is_scheduled():
+    """
+    Regression test: a 0-credit course explicitly marked as required (via
+    required_zero_credit_codes) MUST be scheduled, even though 0-credit
+    courses are excluded by default.
+
+    Found auditing real majors: the Specialist Teaching programme family
+    (Blind and Low Vision, Deaf and Hard of Hearing, Adviser on Deaf
+    Children) each require a 0-credit pass/fail competency exam (e.g.
+    "Braille Proficiency") as a genuine, schedulable degree requirement.
+    not data noise. The blanket 0-credit exclusion silently dropped these,
+    and the validator then correctly (but unhelpfully) reported them as
+    missing, leaving 5 real majors with NO valid plan at ANY campus/mode
+    combination.
+    """
+    normal = _make_course("REQ100", credits=15)
+    zero_cr_required = _make_course("ZCR100", credits=0)
+    gen = _make_generator(
+        [normal, zero_cr_required],
+        required_zero_credit_codes=frozenset({"ZCR100"}),
+    )
+    plan = gen.generate()
+    all_codes = [c.code for s in plan.semesters for c in s.courses]
+    assert "REQ100" in all_codes
+    assert "ZCR100" in all_codes
+
+
+def test_required_zero_credit_course_does_not_affect_credit_cap():
+    """
+    A required 0-credit course scheduled alongside normal courses must not
+    count toward the per-semester credit cap, it should be able to share a
+    semester with a full load of normal courses without ever causing a
+    cap-related skip.
+    """
+    courses = [_make_course(f"REQ{i}", credits=15) for i in range(4)]  # 60cr total
+    zero_cr_required = _make_course("ZCR100", credits=0)
+    gen = _make_generator(
+        courses + [zero_cr_required],
+        max_credits_per_semester=60,
+        required_zero_credit_codes=frozenset({"ZCR100"}),
+    )
+    plan = gen.generate()
+    all_codes = [c.code for s in plan.semesters for c in s.courses]
+    assert "ZCR100" in all_codes
+    for s in plan.semesters:
+        assert s.total_credits() <= 60

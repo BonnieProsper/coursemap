@@ -98,3 +98,65 @@ def test_search_with_elective_pools():
     assert plan is not None
     planned = sum(c.credits for s in plan.semesters for c in s.courses)
     assert planned == total_credits
+
+
+def test_cap_required_codes_never_drops_tree_required():
+    """
+    _cap_required_codes must never drop a code the degree tree checks as
+    required, even when the major's required-course list over-captures
+    (more required credits than the degree target allows).
+    """
+    from coursemap.domain.requirement_nodes import CourseRequirement
+
+    courses = _fixture_courses()
+    # 4 "required" courses (60cr) for a 30cr degree target. Clear over-capture.
+    required_codes = {"STAT101", "MATH101", "COMP101", "PHYS101"}
+    degree_tree = AllOfRequirement((
+        TotalCreditsRequirement(30),
+        AllOfRequirement((CourseRequirement("STAT101"), CourseRequirement("MATH101"))),
+    ))
+    search = PlanSearch(courses, [], PlanGenerator(courses))
+    kept, was_capped = search._cap_required_codes(
+        required_codes, elective_nodes=[], degree_tree=degree_tree,
+        degree_total=30, campus="D", mode="DIS",
+    )
+    assert was_capped is True
+    assert {"STAT101", "MATH101"} <= kept, (
+        "Codes the degree tree checks as required must never be dropped"
+    )
+
+
+def test_cap_required_codes_accounts_for_prerequisite_chain_cost():
+    """
+    When a kept (tree_required) course's prerequisite isn't itself
+    independently required, _cap_required_codes must reserve that chain
+    cost in its budget accounting, otherwise the chain course gets added
+    later by working-set construction without ever having been counted
+    against the cap, silently eating into whatever budget was left for
+    electives.
+
+    STAT201 (15cr) requires STAT101 (15cr, not independently required).
+    true cost of keeping STAT201 is 30cr. A degree_total of 20cr is enough
+    for STAT201 alone but NOT enough once its chain cost is counted, so a
+    droppable elective candidate must be cut to make room.
+    """
+    from coursemap.domain.requirement_nodes import CourseRequirement
+
+    courses = _fixture_courses()
+    required_codes = {"STAT201", "PHYS101"}  # PHYS101 is droppable (not tree_required)
+    degree_tree = AllOfRequirement((
+        TotalCreditsRequirement(20),
+        CourseRequirement("STAT201"),
+    ))
+    search = PlanSearch(courses, [], PlanGenerator(courses))
+    kept, was_capped = search._cap_required_codes(
+        required_codes, elective_nodes=[], degree_tree=degree_tree,
+        degree_total=20, campus="D", mode="DIS",
+    )
+    assert was_capped is True
+    assert "STAT201" in kept, "tree_required course must be kept"
+    assert "PHYS101" not in kept, (
+        "Droppable candidate should be cut once STAT201's real cost "
+        "(15cr course + 15cr chain = 30cr) is counted against the 20cr budget. "
+        "if PHYS101 survives, the chain cost isn't being reserved correctly"
+    )
