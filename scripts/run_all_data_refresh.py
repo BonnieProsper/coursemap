@@ -30,7 +30,7 @@ def run(cmd, desc):
         print("You can continue manually with the next step.")
     return result.returncode == 0
 
-print("CourseMap - Full Data Refresh")
+print("CourseMap: Full Data Refresh")
 print("This will take 35-45 minutes total. Keep this window open.")
 print()
 print("Step 1/2: Prerequisite scraper (~30 min)")

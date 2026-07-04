@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f4c35'/><path d='M8 22 L16 10 L24 22' stroke='%2352b788' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
-<title>coursemap - Massey Degree Planner</title>
+<title>coursemap: Massey Degree Planner</title>
 <!-- Inline theme init to prevent flash of wrong theme before JS loads -->
 <script>
 (function(){
@@ -1368,7 +1368,7 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
     </div>
     <div style="padding:20px;font-size:13px;color:var(--ink2);line-height:1.7">
       <div style="background:var(--amber-lt);border:1px solid rgba(232,168,56,0.3);border-radius:8px;padding:12px;margin-bottom:16px;font-size:12px">
-        ⚠️ <strong>Unofficial tool</strong> - not affiliated with Massey University. Always verify with 
+        ⚠️ <strong>Unofficial tool</strong>, not affiliated with Massey University. Always verify with 
         <a href="https://www.massey.ac.nz/study/" target="_blank" rel="noopener" style="color:var(--green)">official Massey programme info</a> and your academic advisor.
       </div>
       <h4 style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3);margin-bottom:8px">Getting started</h4>
@@ -1381,19 +1381,20 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
       </ol>
       <h4 style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3);margin-bottom:8px">Course card badges</h4>
       <table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:12px">
-        <tr><td style="padding:4px 8px 4px 0"><span style="background:var(--bg3);padding:2px 6px;border-radius:4px;font-size:10px">elective ↔</span></td><td>Free elective - swap for any course at the same level</td></tr>
+        <tr><td style="padding:4px 8px 4px 0"><span style="background:var(--bg3);padding:2px 6px;border-radius:4px;font-size:10px">elective ↔</span></td><td>Free elective, swap for any course at the same level</td></tr>
         <tr><td style="padding:4px 8px 4px 0"><span style="background:var(--bg3);padding:2px 6px;border-radius:4px;font-size:10px">×2</span></td><td>Counts toward both majors in a double major</td></tr>
-        <tr><td style="padding:4px 8px 4px 0"><span style="background:var(--amber-lt);color:var(--amber);border-radius:50%;width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">?</span></td><td>Offering not confirmed for 2026 - verify at Massey</td></tr>
+        <tr><td style="padding:4px 8px 4px 0"><span style="background:var(--amber-lt);color:var(--amber);border-radius:50%;width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">?</span></td><td>Offering not confirmed for 2026, verify at Massey</td></tr>
         <tr><td style="padding:4px 8px 4px 0"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-right:4px"></span></td><td>Prerequisites appear met</td></tr>
-        <tr><td style="padding:4px 8px 4px 0"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red);margin-right:4px"></span></td><td>Prerequisites may be missing - check before enrolling</td></tr>
+        <tr><td style="padding:4px 8px 4px 0"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--amber);margin-right:4px"></span></td><td>Prerequisites recorded but not yet satisfied by this point in the plan</td></tr>
+        <tr><td style="padding:4px 8px 4px 0"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--blue);margin-right:4px"></span></td><td>No prerequisite data recorded for this course (L200+). Unverified, not confirmed-none. Check massey.ac.nz before enrolling.</td></tr>
       </table>
       <h4 style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3);margin-bottom:8px">Known limitations</h4>
       <ul style="padding-left:18px;margin-bottom:16px">
-        <li><strong>Prerequisites</strong> - ~64% of L200+ courses have incomplete or inferred prerequisite data. Always check prerequisites manually before enrolling.</li>
-        <li><strong>Courses marked ?</strong> - 323 courses have no confirmed 2026 offering data. Verify availability at Massey.</li>
-        <li><strong>Minors (beta)</strong> - Minor scheduling is approximate. Check <a href="https://www.massey.ac.nz/study/minors/" target="_blank" rel="noopener" style="color:var(--green)">massey.ac.nz/study/minors</a> for official requirements.</li>
-        <li><strong>Fee estimates</strong> - Rough 2026 approximations only. Use <a href="https://www.massey.ac.nz/fees" target="_blank" rel="noopener" style="color:var(--green)">massey.ac.nz/fees</a> for exact amounts.</li>
-        <li><strong>Elective restrictions</strong> - Some programmes say "choose from List A only" - the planner doesn't enforce these.</li>
+        <li><strong>Prerequisites</strong>: about a third of L200-400 (undergraduate) courses have no prerequisite data recorded. The rate is higher across all levels including postgraduate research papers, many of which genuinely have no prerequisite beyond admission. Always check prerequisites manually before enrolling.</li>
+        <li><strong>Courses marked ?</strong>: 323 courses have no confirmed 2026 offering data. Verify availability at Massey.</li>
+        <li><strong>Minors (beta)</strong>: Minor scheduling is approximate. Check <a href="https://www.massey.ac.nz/study/minors/" target="_blank" rel="noopener" style="color:var(--green)">massey.ac.nz/study/minors</a> for official requirements.</li>
+        <li><strong>Fee estimates</strong>: Rough 2026 approximations only. Use <a href="https://www.massey.ac.nz/fees" target="_blank" rel="noopener" style="color:var(--green)">massey.ac.nz/fees</a> for exact amounts.</li>
+        <li><strong>Elective restrictions</strong>: some programmes say "choose from List A only", the planner doesn't enforce these.</li>
       </ul>
       <h4 style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink3);margin-bottom:8px">Before enrolling</h4>
       <ol style="padding-left:18px;margin-bottom:4px">
@@ -1582,7 +1583,7 @@ function selectMinor(name) {
   // Add minor's required courses as preferred electives
   const preferred = extractMinorCodes(selectedMinor);
   preferred.forEach(code => addTag('prefer-wrap', code));
-  toast(`${selectedMinor.name} Minor added - ${preferred.length} course codes added to preferred electives.`);
+  toast(`${selectedMinor.name} Minor added: ${preferred.length} course codes added to preferred electives.`);
 }
 
 function clearMinor() {
@@ -1606,7 +1607,7 @@ function extractMinorCodes(minor) {
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 async function init() {
-  initTheme();  // Apply saved/system theme immediately - no flash
+  initTheme();  // Apply saved/system theme immediately, no flash
   try {
     const fr = await fetch(`${API}/`, {signal: AbortSignal.timeout(5000)}).then(r => r.json());
     const badge = document.getElementById('freshness-badge');
@@ -1631,7 +1632,7 @@ async function init() {
       <h3 style="margin:0 0 8px;color:var(--ink1)">Server not running</h3>
       <p style="margin:0 0 16px;color:var(--ink2);font-size:14px">
         CourseMap needs the Python server to be running.<br>
-        Open a terminal, go to the <code>coursemap_v6</code> folder, and run:
+        Open a terminal, go to the <code>coursemap</code> folder, and run:
       </p>
       <code style="display:block;background:var(--bg3);padding:10px 14px;border-radius:6px;font-size:13px;text-align:left">
         python -m uvicorn coursemap.api.server:app --reload --port 8000
@@ -1647,6 +1648,12 @@ async function init() {
     allMajors = mRes.majors || [];
     buildQualPills();
   } catch(e) {}
+
+  // Pull the canonical fee-rate table from the backend so this UI's fee
+  // estimates can never silently drift from /api/plan/fees again (see
+  // loadFeeConstants() for the bug this replaced). Falls back to the
+  // bundled table below if the server is briefly unreachable.
+  await loadFeeConstants();
 
   // Auto-detect current year + semester
   const now = new Date();
@@ -2037,6 +2044,31 @@ function showError(msg) {
       </div>`;
     }
   }
+  // A required course is SS-only while Summer School is disabled. Offer a
+  // one-click fix to re-enable it rather than making the student dig through
+  // the checkbox themselves.
+  if (/Summer School is disabled \(--no-summer\)/.test(msg) && !altHtml) {
+    altHtml = `<div class="error-alts">
+      <div class="error-alts-label">Quick fix:</div>
+      <button class="btn-sm" onclick="quickAllowSummer()">Allow Summer School</button>
+    </div>`;
+  }
+  // A required course only exists at a different campus/mode than selected,
+  // offer the same quick-switch buttons used for the whole-major case above,
+  // built from each "only X/Y" fragment in the per-course explanations.
+  if (!altHtml) {
+    const comboMatches = [...msg.matchAll(/only ([A-Z]+\/[A-Z]+(?:,\s*[A-Z]+\/[A-Z]+)*)\s*\(try/g)];
+    const combos = [...new Set(comboMatches.flatMap(m => m[1].split(/,\s*/)))];
+    if (combos.length) {
+      altHtml = `<div class="error-alts">
+        <div class="error-alts-label">Available via:</div>
+        ${combos.map(a => {
+          const [cam, mod] = a.split('/');
+          return `<button class="btn-sm" onclick="quickSwitch('${cam}','${mod}')">${a}</button>`;
+        }).join('')}
+      </div>`;
+    }
+  }
   document.getElementById('main').innerHTML = `
     <div class="error-state">
       <div class="error-icon">⚠</div>
@@ -2044,6 +2076,11 @@ function showError(msg) {
       <div class="error-body">${esc(msg)}</div>
       ${altHtml}
     </div>`;
+}
+
+function quickAllowSummer() {
+  document.getElementById('no-summer').checked = false;
+  generatePlan();
 }
 
 function quickSwitch(campus, mode) {
@@ -2068,8 +2105,8 @@ function renderPlan(data) {
   // ── Disclaimer
   const disc = document.createElement('div');
   disc.className = 'disclaimer';
-  disc.innerHTML = `<span class="disc-icon">⚠</span><span>Unofficial tool - not affiliated with Massey University.
-    Major requirements, prerequisites and fees are <strong>approximate</strong> - always verify with
+  disc.innerHTML = `<span class="disc-icon">⚠</span><span>Unofficial tool, not affiliated with Massey University.
+    Major requirements, prerequisites and fees are <strong>approximate</strong>. Always verify with
     <a href="https://www.massey.ac.nz/study/" target="_blank" rel="noopener noreferrer">official Massey programme info</a>
     and your academic advisor before enrolling.</span>`;
   main.appendChild(disc);
@@ -2195,7 +2232,7 @@ function renderPlan(data) {
     gb.className = 'gap-banner';
     const gapMsg = meta.gap_explanation ||
       `Your major covers ${meta.degree_target - gap}cr of ${meta.degree_target}cr. ` +
-      `You need to schedule ${gap}cr more - enable Auto-fill or add a second major.`;
+      `You need to schedule ${gap}cr more. Enable Auto-fill or add a second major.`;
     gb.innerHTML = `
       <h4>Free elective gap &middot; ${gap}cr unscheduled</h4>
       <p>${esc(gapMsg)}</p>
@@ -2307,10 +2344,10 @@ function renderPlan(data) {
       const badge = isShared
         ? `<span class="shared-badge">×2</span>`
         : isFiller
-          ? `<span class="filler-badge" title="Free elective - swap this for any course at the same level that interests you">elective ↔</span>`
+          ? `<span class="filler-badge" title="Free elective, swap this for any course at the same level that interests you">elective ↔</span>`
           : '';
       const fullYearBadge = c.has_full_year_offering
-        ? `<span class="full-year-badge" title="Full Year enrolment - must enrol for both S1 and S2 as a unit">FY</span>`
+        ? `<span class="full-year-badge" title="Full Year enrolment, must enrol for both S1 and S2 as a unit">FY</span>`
         : '';
 
       // Prereq satisfaction dot
@@ -2320,11 +2357,11 @@ function renderPlan(data) {
         : prereqSat === 'missing'
           ? `<span class="prereq-miss" title="Check prerequisites"></span>`
           : prereqSat === 'unverified'
-            ? `<span class="prereq-unverified" title="No prerequisite data recorded for this course - this usually means the data wasn't captured, not that there isn't one. Check massey.ac.nz before enrolling."></span>`
+            ? `<span class="prereq-unverified" title="No prerequisite data recorded for this course. This usually means the data wasn't captured, not that there isn't one. Check massey.ac.nz before enrolling."></span>`
             : '';
 
       const inferredBadge = c.offering_inferred
-        ? `<span class="inferred-badge" title="Offering data not confirmed for 2026 - verify availability at Massey">?</span>`
+        ? `<span class="inferred-badge" title="Offering data not confirmed for 2026, verify availability at Massey">?</span>`
         : '';
 
       card.innerHTML = `
@@ -2347,13 +2384,13 @@ function renderPlan(data) {
   const chkDiv = document.createElement('div');
   chkDiv.style.cssText = 'margin:28px 0 4px;padding:16px 20px;background:var(--bg3);border:1px solid var(--border1);border-radius:10px;font-size:13px';
   chkDiv.innerHTML = `
-    <div style="font-weight:600;margin-bottom:10px;color:var(--ink2)">Before enrolling - verify this plan</div>
+    <div style="font-weight:600;margin-bottom:10px;color:var(--ink2)">Before enrolling: verify this plan</div>
     <ol style="margin:0;padding-left:18px;color:var(--ink2);line-height:2.1">
       <li>Check your <a href="https://www.massey.ac.nz/study/" target="_blank" rel="noopener" style="color:var(--green)">programme requirements</a> on Massey's website match this plan</li>
-      <li>Verify <strong>every course's prerequisites</strong> - this tool's prereq data is incomplete</li>
+      <li>Verify <strong>every course's prerequisites</strong>, this tool's prereq data is incomplete</li>
       <li>Confirm course <strong>availability</strong> for your specific enrollment year</li>
       <li>If taking a <strong>minor</strong>, add those papers manually (minors not yet in this tool)</li>
-      <li>Book a session with your <a href="https://www.massey.ac.nz/student-life/student-services/student-advisory-services/" target="_blank" rel="noopener" style="color:var(--green)">academic advisor</a> - they can approve and finalise your plan</li>
+      <li>Book a session with your <a href="https://www.massey.ac.nz/student-life/student-services/student-advisory-services/" target="_blank" rel="noopener" style="color:var(--green)">academic advisor</a>, they can approve and finalise your plan</li>
     </ol>`;
   main.appendChild(chkDiv);
 }
@@ -2475,7 +2512,7 @@ async function openDrawer(code) {
     const levelLbl = c.level ? `L${c.level}` : '';
     const inferredNote = c.offering_inferred
       ? `<div class="warn-banner" style="margin:8px 0 0;font-size:12px">
-           ⚠ Availability not confirmed for 2026 - verify at 
+           ⚠ Availability not confirmed for 2026, verify at 
            <a href="${c.url||'https://www.massey.ac.nz/study/'}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">Massey ↗</a>
          </div>`
       : '';
@@ -2500,7 +2537,7 @@ async function openDrawer(code) {
       const massey_url = c.url || 'https://www.massey.ac.nz/study/courses/';
       prereqHtml = `<span style="color:var(--blue);font-size:12px">
         ⚠ No prerequisite data recorded for this course. This usually means the
-        data wasn't captured during scraping - NOT that there isn't one.
+        data wasn't captured during scraping, NOT that there isn't one.
         Check <a href="${escAttr(massey_url)}" target="_blank" rel="noopener">massey.ac.nz</a>
         before enrolling.
       </span>`;
@@ -2528,7 +2565,7 @@ async function openDrawer(code) {
       }
     } catch(e) { /* chain vis optional */ }
 
-    // Restrictions - always escape codes, never render raw
+    // Restrictions, always escape codes, never render raw
     let restrictHtml = '';
     if (c.restrictions?.length) {
       const rCodes = c.restrictions.map(r => `<span class="pnode-code">${escAttr(r)}</span>`).join(', ');
@@ -2781,7 +2818,7 @@ async function openCourseModal() {
   document.getElementById('course-modal').classList.add('open');
   document.getElementById('modal-q').value = '';
   document.getElementById('modal-q').focus();
-  // Load a smaller initial set - server handles filtering
+  // Load a smaller initial set, server handles filtering
   await fetchModalCourses('', modalLevel);
 }
 
@@ -2796,7 +2833,7 @@ function closeCourseModal() {
 let modalSearchTimer = null;
 function modalSearch(q) {
   clearTimeout(modalSearchTimer);
-  // Debounce search - wait 250ms after last keystroke before hitting the API
+  // Debounce search, wait 250ms after last keystroke before hitting the API
   modalSearchTimer = setTimeout(() => fetchModalCourses(q, modalLevel), 250);
 }
 
@@ -2846,7 +2883,7 @@ async function fetchModalCourses(q, lvl) {
     const total = data.count || courses.length;
 
     document.getElementById('modal-count').textContent =
-      `${total.toLocaleString()} courses${q ? ` matching "${q}"` : ''}${total > 150 ? ' - showing first 150' : ''}`;
+      `${total.toLocaleString()} courses${q ? ` matching "${q}"` : ''}${total > 150 ? ' (showing first 150)' : ''}`;
 
     if (!courses.length) {
       document.getElementById('modal-results').innerHTML = `<div class="modal-empty">No courses found.</div>`;
@@ -2864,7 +2901,7 @@ async function fetchModalCourses(q, lvl) {
         <span class="modal-cr">${c.credits}cr</span>
         <span class="modal-sem">${escAttr(sems)}</span>
       </div>`;
-    }).join('') + (total > 150 ? `<div class="modal-empty" style="padding:12px;font-size:12px;color:var(--ink3)">Showing first 150 of ${total.toLocaleString()} - refine your search to narrow down</div>` : '');
+    }).join('') + (total > 150 ? `<div class="modal-empty" style="padding:12px;font-size:12px;color:var(--ink3)">Showing first 150 of ${total.toLocaleString()}. Refine your search to narrow down</div>` : '');
   } catch(e) {
     document.getElementById('modal-results').innerHTML = `<div class="modal-empty">Failed to load courses.</div>`;
     document.getElementById('modal-count').textContent = '';
@@ -2944,7 +2981,7 @@ function commitSave() {
   const meta  = currentPlan.response.meta || {};
   const planId = currentPlan.response.plan_id || null;
 
-  // Check for duplicate name - warn but still save
+  // Check for duplicate name, warn but still save
   const dupeIdx = plans.findIndex(p => p.name === name);
   if (dupeIdx >= 0) {
     plans.splice(dupeIdx, 1); // replace
@@ -2993,8 +3030,8 @@ async function loadSaved(i) {
         return;
       }
     } catch(e) {}
-    // Cache miss - fall through to regenerate
-    toast('Cached plan expired - regenerating…');
+    // Cache miss, fall through to regenerate
+    toast('Cached plan expired, regenerating…');
   }
 
   // Fallback: restore form and regenerate
@@ -3058,7 +3095,7 @@ function pushUrl(req, planId) {
   if (req.completed?.length) p.set('done', req.completed.join(','));
   if (req.prefer?.length)    p.set('prefer', req.prefer.join(','));
   if (req.exclude?.length)   p.set('exclude', req.exclude.join(','));
-  // Stable plan_id - share links load the cached plan, not a re-run
+  // Stable plan_id, share links load the cached plan, not a re-run
   if (planId) p.set('pid', planId);
   history.replaceState(null,'',`?${p.toString()}`);
 }
@@ -3080,7 +3117,7 @@ async function restoreFromUrl() {
   if (p.get('exclude'))  p.get('exclude').split(',').filter(Boolean).forEach(c => addTag('exclude-wrap',c));
 
   if (p.get('pid')) {
-    // Shared link with a plan_id - fetch the cached plan directly (deterministic)
+    // Shared link with a plan_id, fetch the cached plan directly (deterministic)
     showLoading();
     try {
       const res = await fetch(`${API}/plan/${p.get('pid')}`);
@@ -3094,7 +3131,7 @@ async function restoreFromUrl() {
         return;
       }
     } catch(e) {}
-    // Cache miss - fall through to re-generate
+    // Cache miss, fall through to re-generate
   }
 
   if (p.get('major')) setTimeout(() => generatePlan(), 300);
@@ -3172,7 +3209,7 @@ function downloadHtml() {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>coursemap - ${escHtml(meta.major)}</title>
+<title>coursemap: ${escHtml(meta.major)}</title>
 <style>
   body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;background:#f9f9f7;color:#1a1a18}
   h1{font-size:24px;margin:0 0 4px}
@@ -3441,7 +3478,7 @@ function escHtml(s) { return esc(s); }
 // ── Mobile tab bar ──────────────────────────────────────────────────────────
 // On mobile, the hamburger + sidebar-overlay pattern requires too many taps.
 // A bottom tab bar lets students switch between Settings, Plan and Courses
-// with a single tap - matching native app conventions on iOS/Android.
+// with a single tap, matching native app conventions on iOS/Android.
 
 function initTabBar() {
   const bar = document.getElementById('mobile-tabs');
@@ -3534,12 +3571,12 @@ function getPrereqSatisfaction(course, plannedCodes) {
   //
   // 'unverified' means: no prerequisite is recorded for this course, AND
   // it's at a level (200+) where Massey courses almost always have one.
-  // This is NOT the same as "confirmed no prerequisite" - the dataset has
+  // This is NOT the same as "confirmed no prerequisite". The dataset has
   // a real, substantial gap here (around a third of L200+ courses have no
   // prerequisite recorded, which is a data-collection gap, not a fact about
   // the course). Surfacing this distinctly means a student isn't shown the
   // same "all clear" appearance for "we don't have this data" as for
-  // "this genuinely has no prerequisite" - those are very different things
+  // "this genuinely has no prerequisite". Those are very different things
   // to rely on before enrolling.
   if (!course.prerequisite_expression) {
     if (course.prereq_data_available === false && (course.level || 0) >= 200) {
@@ -3562,11 +3599,16 @@ function getPrereqSatisfaction(course, plannedCodes) {
 }
 
 // ── NZ fees estimator ─────────────────────────────────────────────────────────
-// Per-credit fee rates by subject area (2026, approximate).
-// Source: Massey published fee schedules divided by typical course credit value.
-// These are estimates only - verify at massey.ac.nz/fees
+// The rate table below is a FALLBACK ONLY, used if /api/fees/constants can't
+// be reached at startup (e.g. briefly offline). Once loadFeeConstants() below
+// succeeds, FEE_RATES_DOMESTIC etc. are overwritten with the live values from
+// coursemap/domain/fees.py, the single source of truth. Do not hand-edit
+// this table to add a subject; edit fees.py instead, or the two will drift
+// apart again (this already happened once: this copy was missing "Software
+// Engineering" and "Information Sciences", silently understating their fee
+// estimate to the flat default rate while the backend was already correct).
 
-const FEE_RATES_DOMESTIC = {
+let FEE_RATES_DOMESTIC = {
   "Art History": 52, "Classical Studies": 52, "Classics": 52, "Development Studies": 52,
   "Music": 58, "Philosophy": 52, "Politics": 52, "Sociology": 52,
   "International Relations": 52, "History": 52, "Geography": 55,
@@ -3583,15 +3625,34 @@ const FEE_RATES_DOMESTIC = {
   "Paramedicine": 72, "Physiotherapy": 78, "Sport & Exercise Science": 65,
   "Sport Science": 65, "Design": 70, "Research Methods": 58, "Foundation Studies": 50,
 };
-const FEE_INTL_MULTIPLIER = 2.8;
-const FEE_DEFAULT_UG = 60;
-const FEE_DEFAULT_PG = 75;
+let FEE_INTL_MULTIPLIER = 2.8;
+let FEE_DEFAULT_UG = 60;
+let FEE_DEFAULT_PG = 75;
+let FEE_PG_MIN_RATE = 70;
+let feeConstantsLoaded = false;
+
+async function loadFeeConstants() {
+  try {
+    const c = await fetch(`${API}/fees/constants`, {signal: AbortSignal.timeout(5000)}).then(r => r.json());
+    if (c && c.subject_fee_per_credit) {
+      FEE_RATES_DOMESTIC = c.subject_fee_per_credit;
+      FEE_INTL_MULTIPLIER = c.international_multiplier ?? FEE_INTL_MULTIPLIER;
+      FEE_DEFAULT_UG = c.default_fee_per_credit_ug ?? FEE_DEFAULT_UG;
+      FEE_DEFAULT_PG = c.default_fee_per_credit_pg ?? FEE_DEFAULT_PG;
+      FEE_PG_MIN_RATE = c.postgrad_min_rate ?? FEE_PG_MIN_RATE;
+      feeConstantsLoaded = true;
+    }
+  } catch (e) {
+    // Server briefly unreachable. Keep the bundled fallback table above.
+    // It may be slightly stale but estimates are approximate either way.
+  }
+}
 
 function feePerCredit(subjectArea, level, studentType) {
   let base = (subjectArea && FEE_RATES_DOMESTIC[subjectArea])
     ? FEE_RATES_DOMESTIC[subjectArea]
     : (level >= 700 ? FEE_DEFAULT_PG : FEE_DEFAULT_UG);
-  if (level >= 700 && base < 70) base = Math.max(base, 70);
+  if (level >= 700 && base < FEE_PG_MIN_RATE) base = Math.max(base, FEE_PG_MIN_RATE);
   if (studentType === 'international') base *= FEE_INTL_MULTIPLIER;
   return base;
 }
@@ -3671,7 +3732,7 @@ function showDisclaimerModal() {
       <button onclick="document.getElementById('disclaimer-modal').remove();localStorage.setItem('cm-disclaimer-seen','1')"
         style="background:var(--green);color:var(--bg);border:none;border-radius:8px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:background 0.15s"
         onmouseover="this.style.background='#63cfA0'" onmouseout="this.style.background='var(--green)'">
-        I understand - show me the planner
+        I understand, show me the planner
       </button>
     </div>`;
   document.body.appendChild(overlay);
@@ -3693,7 +3754,7 @@ function addToCompleted(code) {
   addTag('completed-wrap', code);
   closeDrawer();
   if (currentPlan) {
-    toast(`${code} marked done - re-generating plan…`);
+    toast(`${code} marked done, re-generating plan…`);
     setTimeout(() => generatePlan(), 400);
   } else {
     toast(`${code} added to completed courses.`);
@@ -3714,7 +3775,7 @@ function addToPrefer(code) {
 
 </script>
 
-<!-- Mobile bottom tab bar - hidden on desktop via CSS -->
+<!-- Mobile bottom tab bar, hidden on desktop via CSS -->
 <nav id="mobile-tabs" class="mobile-tab-bar" style="display:none" role="tablist">
   <button class="mob-tab" id="tab-settings" onclick="setActiveTab('settings')" aria-label="Settings">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

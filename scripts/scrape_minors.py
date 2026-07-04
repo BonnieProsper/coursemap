@@ -159,7 +159,7 @@ def scrape_minor(name: str, url: str, courses_map: dict) -> dict | None:
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
         if r.status_code == 404:
-            print(f"  404: {name} - URL may have changed: {url}")
+            print(f"  404: {name}. URL may have changed: {url}")
             return None
         if r.status_code != 200:
             print(f"  HTTP {r.status_code}: {name}")
@@ -172,7 +172,7 @@ def scrape_minor(name: str, url: str, courses_map: dict) -> dict | None:
         valid_codes = [c for c in codes if c in courses_map]
         
         if len(valid_codes) < 3:
-            print(f"  ⚠ {name}: only {len(valid_codes)} valid codes found - check manually")
+            print(f"  ⚠ {name}: only {len(valid_codes)} valid codes found, check manually")
         
         req_tree = build_requirement_tree(valid_codes, courses_map)
         
@@ -186,7 +186,7 @@ def scrape_minor(name: str, url: str, courses_map: dict) -> dict | None:
             "note": f"Scraped from {url}. Verify with official Massey minor regulations."
         }
     except Exception as e:
-        print(f"  ERROR: {name} - {e}")
+        print(f"  ERROR: {name}: {e}")
         return None
 
 

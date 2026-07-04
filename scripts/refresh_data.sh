@@ -20,21 +20,21 @@ cp datasets/majors.json  "$BACKUP/" 2>/dev/null || true
 echo "✓ Backed up datasets to $BACKUP"
 
 if [ "$DRY_RUN" = "1" ]; then
-  echo "(dry-run: repair + validate only)"
-  python3 -m coursemap.ingestion.repair_dataset
+  echo "(dry-run: repair + validate only - courses.json/majors.json will NOT be written)"
+  python3 -m coursemap.ingestion.repair_dataset --dry-run
   python3 -m coursemap.validation.dataset_validator --report
   exit 0
 fi
 
 [ "$MAJORS_ONLY" = "0" ] && {
   echo "── Scraping courses (10–30 min)…"
-  python3 -m coursemap.ingestion.build_courses_dataset --output datasets/courses.json --sleep 0.5
+  python3 -m coursemap.ingestion.build_dataset
   echo "✓ Courses done"
 }
 
 [ "$COURSES_ONLY" = "0" ] && {
   echo "── Scraping majors (5–15 min)…"
-  python3 -m coursemap.ingestion.build_majors_dataset --output datasets/majors.json --sleep 0.5
+  python3 -m coursemap.ingestion.build_majors_dataset
   echo "✓ Majors done"
 }
 
