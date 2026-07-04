@@ -33,10 +33,11 @@ def _prereq_codes_or_aware(prereq, known: set[str]) -> set[str]:
     Return the set of codes that are REQUIRED (i.e. must be present before
     this course can run) accounting for OR expressions.
 
-    For AND nodes, all children must be satisfiable - their required codes union.
-    For OR nodes, only ONE branch needs to be satisfiable - we take the
-    intersection of all branches' codes (i.e. codes required by every branch).
-    Codes not in ``known`` are ignored (treated as external/satisfied).
+    For AND nodes, all children must be satisfiable, so we union their
+    required codes. For OR nodes, only one branch needs to be satisfiable,
+    so we take the intersection of all branches' codes (codes required by
+    every branch). Codes not in ``known`` are ignored (treated as
+    external/satisfied).
 
     This is used by the rebalancer safety check to avoid moving a course that
     is needed by another course as a prerequisite. Using full required_courses()
@@ -44,21 +45,11 @@ def _prereq_codes_or_aware(prereq, known: set[str]) -> set[str]:
     branch of an OR needs to be met), causing valid rebalancing moves to be
     rejected unnecessarily.
 
-    OR-intersection caveat: when an OR has a branch that's entirely external
-    (no codes in `known` at all - e.g. an admission gatekeeper code that was
-    never added to the working set), that branch's contribution to the
-    intersection is an empty set. Naively intersecting with an empty set
-    collapses the WHOLE intersection to empty, making the function report
-    "nothing required" even when another branch of the same OR is fully
-    known and genuinely required. That let the rebalancer treat such a
-    course as having no prerequisite dependency at all and move it earlier,
-    silently violating real prerequisite ordering (e.g. an OR-aware required
-    course scheduled before either of its OR-branches had been completed).
-
-    Fix: only intersect across branches that have at least one code in
-    `known` - fully-external branches are excluded from the intersection
-    rather than contributing an empty set to it, since an empty contribution
-    in set-intersection terms always wins and that's not the intent here.
+    Branches with zero codes in `known` (fully external, e.g. an admission
+    gatekeeper) are excluded from the intersection rather than contributing
+    an empty set to it. An empty contribution would otherwise collapse the
+    whole intersection to "nothing required" even when a sibling branch is
+    fully known and genuinely required.
     """
     from coursemap.domain.prerequisite import (
         AndExpression, OrExpression, CoursePrerequisite,
@@ -81,7 +72,7 @@ def _prereq_codes_or_aware(prereq, known: set[str]) -> set[str]:
             branch_sets = [_codes(child) for child in node.children]
             trackable = [s for s in branch_sets if s]
             if not trackable:
-                # Every branch is external - nothing here is required.
+                # Every branch is external, so nothing here is required.
                 return set()
             result = trackable[0]
             for s in trackable[1:]:
@@ -99,6 +90,52 @@ def _prereq_codes_or_aware(prereq, known: set[str]) -> set[str]:
 
 REBALANCE_THRESHOLD = 30  # credits below which the final semester triggers rebalancing
 
+# General Massey regulation (not a per-course prerequisite, and not encoded
+# anywhere in courses.json): "Students cannot enrol for any 200-level course
+# unless they have passed at least 45 credits at 100-level, nor enrol for any
+# 300-level course unless they have passed at least 45 credits at 200-level."
+# This only applies to undergraduate levels (100-400); postgraduate enrolment
+# (700+) is gated by programme admission, not this credit-progression rule.
+# Keyed by the level being enrolled in -> (credits required, at this level).
+_LEVEL_PROGRESSION_GATE: dict[int, tuple[int, int]] = {
+    200: (45, 100),
+    300: (45, 200),
+}
+
+
+def _cumulative_level_credits(completed: set[str], courses: dict, level: int) -> int:
+    """Total credits among `completed` whose course is at exactly `level`."""
+    return sum(
+        courses[c].credits for c in completed
+        if c in courses and courses[c].level == level
+    )
+
+
+def _level_progression_blocked(
+    course_level: int,
+    completed: set[str],
+    courses: dict,
+) -> str | None:
+    """
+    Return a human-readable reason if enrolling in `course_level` is blocked
+    by the general level-progression rule, or None if it's allowed.
+
+    Only L200 and L300 are gated (see _LEVEL_PROGRESSION_GATE); L100 has no
+    gate, and L400+/postgraduate levels are not subject to this specific
+    credit-progression rule.
+    """
+    gate = _LEVEL_PROGRESSION_GATE.get(course_level)
+    if gate is None:
+        return None
+    required, gate_level = gate
+    have = _cumulative_level_credits(completed, courses, gate_level)
+    if have < required:
+        return (
+            f"needs {required}cr at L{gate_level} to enrol in a L{course_level} "
+            f"course (general Massey progression rule), only has {have}cr"
+        )
+    return None
+
 
 @dataclass
 class PlanStats:
@@ -109,6 +146,32 @@ class PlanStats:
     semesters_generated: int = 0      # semester slots that contained at least one course
     empty_semesters_skipped: int = 0  # semester slots where nothing was eligible
     rebalance_moves: int = 0          # courses repositioned by post-pass rebalancing
+
+
+def _level_credits_before(
+    semesters: list[list[Course]],
+    upto_idx: int,
+    prior_completed: frozenset,
+    courses: dict,
+) -> dict[int, int]:
+    """
+    Cumulative credits per level from prior_completed plus all of
+    semesters[0:upto_idx] (exclusive of upto_idx itself).
+
+    Used by the rebalance passes to check whether moving a course would
+    strand an intermediate L200/L300 course below its progression gate.
+    Same semantic as `completed` during the initial greedy pass, but
+    computed from a semester list rather than accumulated incrementally.
+    """
+    totals: dict[int, int] = {}
+    for code in prior_completed:
+        c = courses.get(code)
+        if c:
+            totals[c.level] = totals.get(c.level, 0) + c.credits
+    for i in range(upto_idx):
+        for c in semesters[i]:
+            totals[c.level] = totals.get(c.level, 0) + c.credits
+    return totals
 
 
 class PlanGenerator:
@@ -135,6 +198,8 @@ class PlanGenerator:
         max_semesters: int = 24,
         prior_completed: frozenset = frozenset(),
         no_summer: bool = False,
+        required_zero_credit_codes: frozenset = frozenset(),
+        enforce_level_progression: bool = True,
     ):
         self.courses = courses
         self.max_credits = max_credits_per_semester
@@ -146,6 +211,8 @@ class PlanGenerator:
         self.max_semesters = max_semesters
         self.prior_completed: frozenset = prior_completed
         self.no_summer = no_summer
+        self.required_zero_credit_codes: frozenset = required_zero_credit_codes
+        self.enforce_level_progression = enforce_level_progression
         self._known_codes: set[str] = set(self.courses)
         self.filler_codes: frozenset = frozenset()  # set via generate_filled_plan
         self.stats: PlanStats = PlanStats()
@@ -155,12 +222,25 @@ class PlanGenerator:
 
         # Pre-completed courses are excluded from scheduling but seed the
         # completed set so their codes satisfy prerequisite checks.
-        # Zero-credit courses (practicums, language enrollments) are non-schedulable
-        # and must never enter the remaining set - they would deadlock the scheduler.
+        # Zero-credit ELECTIVE/pool courses (practicums, language enrollments)
+        # are non-schedulable and must never enter the remaining set. They
+        # would deadlock the scheduler's credit-cap and rebalancing math,
+        # which assumes positive course weights. Zero-credit courses that are
+        # directly REQUIRED (e.g. a pass/fail competency exam like Braille
+        # Proficiency in Specialist Teaching programmes) are real,
+        # schedulable requirements, not data noise. Excluding them
+        # unconditionally caused several majors to have NO valid plan at
+        # ANY campus/mode combination, since the validator correctly
+        # expected a course the scheduler had silently made impossible to
+        # ever place. required_zero_credit_codes carries the specific
+        # codes that are safe to include despite having zero credits.
         remaining: set[str] = {
             code for code in self.courses.keys()
             if code not in self.prior_completed
-            and self.courses[code].credits > 0
+            and (
+                self.courses[code].credits > 0
+                or code in self.required_zero_credit_codes
+            )
         }
         completed: set[str] = set(self.prior_completed)
         semesters: list[SemesterPlan] = []
@@ -171,8 +251,8 @@ class PlanGenerator:
         _sem_start = {"S1": 0, "S2": 1, "SS": 2}
         semester_index = _sem_start.get(self.start_semester, 0)
         # Adjust base_year so year arithmetic is correct when starting mid-cycle
-        # Each full cycle = 1 year; starting at index 1 or 2 means we're already
-        # partway into the year, so no year adjustment needed - the year increments
+        # Each full cycle = 1 year. Starting at index 1 or 2 means we're already
+        # partway into the year, so no year adjustment needed. The year increments
         # naturally when index // 3 increases.
 
         # Count only *active* semesters (not skipped SS slots) against the
@@ -325,9 +405,9 @@ class PlanGenerator:
         Post-pass rebalancing: when the final semester is underfilled (< threshold
         credits), attempt to move flexible courses from earlier semesters into it.
 
-        The rebalance threshold is now adaptive: it's set to 1.5× the median
+        The rebalance threshold is now adaptive: it's set to 1.5x the median
         course credit value in the plan, clamped to [15, 60]. This means a
-        postgrad plan of 30cr courses uses threshold=45, not 30 - correctly
+        postgrad plan of 30cr courses uses threshold=45, not 30, correctly
         triggering rebalancing. An undergrad plan of 15cr courses uses threshold=22.
 
         A course is a valid rebalancing candidate when:
@@ -436,6 +516,18 @@ class PlanGenerator:
                 if course.corequisites & self._known_codes:
                     continue
 
+                # (g) level-progression safety: removing a L100/L200 course
+                #     from its semester reduces the cumulative level-credit
+                #     count available to any L200/L300 course scheduled in an
+                #     intermediate semester (src_idx+1 .. final-1). If that
+                #     drop would push an intermediate course below its 45cr
+                #     gate (see _LEVEL_PROGRESSION_GATE), the move is unsafe.
+                #     Leave the course in its original semester instead.
+                if self.enforce_level_progression and self._rebalance_move_breaks_progression(
+                    course, src_idx, sem_courses
+                ):
+                    continue
+
                 # Move the course.
                 sem_courses[src_idx].remove(course)
                 sem_courses[-1].append(course)
@@ -480,8 +572,8 @@ class PlanGenerator:
         # their combined load fits within max_credits, merge them.
         #
         # Guard: do not merge when any course in the final requires a course in
-        # the penultimate as a prerequisite.  The greedy pass scheduled them in
-        # separate semesters for a reason - merging would produce a plan where
+        # the penultimate as a prerequisite. The greedy pass scheduled them in
+        # separate semesters for a reason. Merging would produce a plan where
         # a course is co-scheduled with its own prerequisite.
         penultimate = result[-2]
         final = result[-1]
@@ -530,6 +622,77 @@ class PlanGenerator:
             logger.debug("Equalise: %d move(s) across mid-plan semesters", equalise_moves)
 
         return result
+
+    def _rebalance_move_breaks_progression(
+        self,
+        course: Course,
+        src_idx: int,
+        sem_courses: list[list[Course]],
+    ) -> bool:
+        """
+        True if removing `course` from sem_courses[src_idx] (to move it later,
+        into the final semester) would drop the cumulative level-credit count
+        below the progression gate for any course in an intermediate semester
+        (src_idx+1 .. len-2).
+
+        Only L100/L200 courses can possibly matter here, since those are the
+        only levels the gate (_LEVEL_PROGRESSION_GATE) reads from. Moving an
+        L300+ course later never affects another course's gate credits.
+        """
+        if course.level not in (100, 200):
+            return False
+
+        for mid_idx in range(src_idx + 1, len(sem_courses) - 1):
+            before = _level_credits_before(
+                sem_courses, mid_idx, self.prior_completed, self.courses
+            )
+            after_removal = dict(before)
+            after_removal[course.level] = after_removal.get(course.level, 0) - course.credits
+
+            for mid_course in sem_courses[mid_idx]:
+                gate = _LEVEL_PROGRESSION_GATE.get(mid_course.level)
+                if gate is None or gate[1] != course.level:
+                    continue
+                required, _ = gate
+                if after_removal.get(course.level, 0) < required <= before.get(course.level, 0):
+                    return True
+        return False
+
+    def _equalise_move_breaks_progression(
+        self,
+        course: Course,
+        dst_idx: int,
+        src_idx: int,
+        sem_courses: list[list[Course]],
+    ) -> bool:
+        """
+        True if removing `course` from sem_courses[src_idx] (to move it
+        earlier, into sem_courses[dst_idx]) would drop the cumulative
+        level-credit count below the progression gate for any course in an
+        intermediate semester (dst_idx+1 .. src_idx-1).
+
+        This mirrors _rebalance_move_breaks_progression but the intermediate
+        range runs the opposite direction, since _equalise moves courses
+        toward an earlier semester rather than the final one.
+        """
+        if course.level not in (100, 200):
+            return False
+
+        for mid_idx in range(dst_idx + 1, src_idx):
+            before = _level_credits_before(
+                sem_courses, mid_idx, self.prior_completed, self.courses
+            )
+            after_removal = dict(before)
+            after_removal[course.level] = after_removal.get(course.level, 0) - course.credits
+
+            for mid_course in sem_courses[mid_idx]:
+                gate = _LEVEL_PROGRESSION_GATE.get(mid_course.level)
+                if gate is None or gate[1] != course.level:
+                    continue
+                required, _ = gate
+                if after_removal.get(course.level, 0) < required <= before.get(course.level, 0):
+                    return True
+        return False
 
     def _equalise(self, semesters: list[SemesterPlan]) -> int:
         """
@@ -634,6 +797,30 @@ class PlanGenerator:
                     if course.corequisites & self._known_codes:
                         continue
 
+                    # (h) level-progression safety, direction 1: the course
+                    #     itself must satisfy its own gate at its new, earlier
+                    #     position (dst_idx). Moving e.g. an L300 course
+                    #     earlier could place it before 45cr of L200 has
+                    #     accrued, even though no single course names it.
+                    if self.enforce_level_progression:
+                        gate = _LEVEL_PROGRESSION_GATE.get(course.level)
+                        if gate is not None:
+                            required, gate_level = gate
+                            have = _level_credits_before(
+                                sem_courses, dst_idx, self.prior_completed, self.courses
+                            ).get(gate_level, 0)
+                            if have < required:
+                                continue
+
+                    # (i) level-progression safety, direction 2: removing this
+                    #     L100/L200 course from src_idx must not strand any
+                    #     L200/L300 course in an intermediate semester
+                    #     (dst_idx+1 .. src_idx-1) below its own gate.
+                    if self.enforce_level_progression and self._equalise_move_breaks_progression(
+                        course, dst_idx, src_idx, sem_courses
+                    ):
+                        continue
+
                     # Move.
                     sem_courses[src_idx].remove(course)
                     sem_courses[dst_idx].append(course)
@@ -645,11 +832,9 @@ class PlanGenerator:
                         course.code, src_idx, dst_idx,
                     )
 
-        # Rebuild SemesterPlan objects (SemesterPlan is frozen - create new instances).
+        # SemesterPlan is frozen, so rebuild the list rather than mutate in place.
         # Drop any semesters that became empty (shouldn't happen since we guard
         # source non-empty, but be safe).
-
-        # SemesterPlan is frozen - rebuild the list.
         result: list[SemesterPlan] = []
         for i, cl in enumerate(sem_courses):
             if cl:
@@ -658,7 +843,7 @@ class PlanGenerator:
                     semester=semesters[i].semester,
                     courses=tuple(cl),
                 ))
-            # else: equalise left this empty - drop it (shouldn't happen)
+            # else: equalise left this empty, drop it (shouldn't happen)
 
         # Replace contents of the input list so caller sees updated semesters.
         semesters[:] = result
@@ -724,7 +909,9 @@ class PlanGenerator:
         A course is eligible when:
           (a) it is offered this semester at the configured campus/mode,
           (b) its prerequisites are met (or are outside the known set),
-          (c) none of its restriction codes have been completed.
+          (c) none of its restriction codes have been completed,
+          (d) the general level-progression rule is satisfied (45cr at the
+              level below, for L200/L300, see _LEVEL_PROGRESSION_GATE).
 
         Counts are per-semester-pass and accumulate into self.stats in generate().
         Note: corequisite checking is deferred to the greedy fill loop so that
@@ -748,6 +935,12 @@ class PlanGenerator:
             if (
                 course.prerequisites
                 and not prereqs_met(course.prerequisites, completed, self._known_codes)
+            ):
+                prereq_rej += 1
+                continue
+
+            if self.enforce_level_progression and _level_progression_blocked(
+                course.level, completed, self.courses
             ):
                 prereq_rej += 1
                 continue
@@ -779,11 +972,15 @@ class PlanGenerator:
           an internal-only course in a distance plan).
         - When no_summer=True, it is offered only in SS (can never be scheduled).
         - A restriction code has been completed.
-        - Its prerequisites are satisfied (used as a proxy for "could be
-          scheduled in some future semester").
+
+        A course does NOT count as future-possible in *this* snapshot (though
+        it may later, once `completed` grows) when:
+        - Its prerequisites are not yet satisfied.
+        - The general level-progression rule isn't yet satisfied (e.g. a L300
+          course needs 45cr at L200 first, see _LEVEL_PROGRESSION_GATE).
 
         Any course not permanently blocked counts as future-possible even if
-        its prerequisites are not yet met -- they may be met in a later semester.
+        its prerequisites are not yet met. They may be met in a later semester.
         """
         for code in remaining:
             course = self.courses[code]
@@ -802,6 +999,11 @@ class PlanGenerator:
                 known_restrictions = course.restrictions & self._known_codes
                 if known_restrictions & completed:
                     continue
-            if prereqs_met(course.prerequisites, completed, self._known_codes):
-                return True
+            if not prereqs_met(course.prerequisites, completed, self._known_codes):
+                continue
+            if self.enforce_level_progression and _level_progression_blocked(
+                course.level, completed, self.courses
+            ):
+                continue
+            return True
         return False

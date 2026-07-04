@@ -33,7 +33,6 @@ from coursemap.domain.requirement_utils import (
     collect_course_codes,
     collect_course_node_codes,
     collect_elective_nodes,
-    find_total_credits,
 )
 from coursemap.optimisation.search import PlanSearch
 from coursemap.planner.generator import PlanGenerator
@@ -95,6 +94,7 @@ class PlannerService:
         self.majors = majors
         self._qual_map = _load_qualification_map()
         self.last_plan_stats = None
+        self.last_needed_levels: dict[int, int] = {}
 
     # ------------------------------------------------------------------
     # Public interface
@@ -114,6 +114,7 @@ class PlannerService:
         excluded_courses: frozenset = frozenset(),
         no_summer: bool = True,
         transfer_credits: int = 0,
+        _allow_level_progression_shortfall: bool = False,
     ) -> DegreePlan:
         """
         Generate the best valid degree plan for the given major.
@@ -134,6 +135,15 @@ class PlannerService:
 
         Raises:
             ValueError: No matching major, ambiguous name, or no valid plan exists.
+
+        Note: _allow_level_progression_shortfall is internal, set only by
+        generate_filled_plan's first (discovery) call to itself. See
+        PlanSearch.allow_level_progression_shortfall and
+        _repair_level_progression for what it actually changes. Direct
+        callers should never need to pass this; the resulting plan can be
+        a real but DELIBERATELY incomplete named-pool selection, which
+        generate_filled_plan knows how to recover from but a typical caller
+        does not.
         """
         resolved = self._resolve_major(major_name)
 
@@ -141,12 +151,14 @@ class PlannerService:
         for m in resolved:
             req_tree = self._build_major_req_tree(m)
             degree_tree = self._build_degree_tree(m, req_tree, campus=campus, mode=mode)
+            qual = self._qual_map.get(m["name"])
             parsed_majors.append({
                 "name": m["name"],
                 "url": m.get("url", ""),
                 "raw": m,
                 "requirement": req_tree,
                 "degree_tree": degree_tree,
+                "qual_level": qual["level"] if qual else None,
             })
 
         generator_template = PlanGenerator(
@@ -167,10 +179,12 @@ class PlannerService:
             prior_completed=prior_completed,
             preferred_electives=preferred_electives,
             excluded_courses=excluded_courses,
+            allow_level_progression_shortfall=_allow_level_progression_shortfall,
         )
 
         plan = search.search()
         self.last_plan_stats = search.best_generator_stats
+        self.last_needed_levels = dict(search.last_needed_levels)
         if transfer_credits > 0:
             plan.transfer_credits = transfer_credits
         return plan
@@ -295,7 +309,7 @@ class PlannerService:
         query_has_qual = any(m in query for m in _POSTGRAD_MARKERS + _UNDERGRAD_MARKERS)
 
         if query_has_qual:
-            return None  # User specified a qualifier - don't second-guess them
+            return None  # User specified a qualifier, don't second-guess them
 
         undergrad = [
             m for m in candidates
@@ -354,26 +368,23 @@ class PlannerService:
         Derive the full degree requirement tree for this major, filtered to the
         configured delivery mode.
 
-        Two adjustments are made relative to the raw requirement tree:
+        Two adjustments relative to the raw requirement tree:
 
-        1. CourseRequirement nodes for courses with no offering in the given
-           campus/mode are removed. This aligns the validation tree with the
-           working set so a plan is not penalised for requirements it genuinely
+        1. CourseRequirement nodes with no offering in this campus/mode are
+           removed, so a plan isn't penalised for requirements it genuinely
            cannot satisfy (e.g. internal-only fieldwork in a distance plan).
 
-        2. Credit and level constraints (TotalCredits, MaxLevel, MinLevel) are
-           included only when the schedulable major credits cover the full degree
-           target. When the scraped data is incomplete (free electives missing),
-           these constraints are omitted to avoid false failures.
+        2. Degree-wide credit/level constraints are included only when the
+           schedulable major credits cover the full degree target. When
+           scraped data is incomplete, these are omitted to avoid false
+           failures.
 
-        `keep_open_pools`: generation-time callers validate an UNFILLED base
-        plan, before free electives have been added - for them, the open
-        free-elective pool should be dropped (default, False), since checking
-        it against a plan that hasn't been given electives yet would always
-        fail. Callers validating a COMPLETE, already-filled plan (e.g. the
-        standalone /api/plan/validate endpoint) should pass True so the free
-        elective requirement is actually checked against what the student
-        took.
+        `keep_open_pools`: pass True only when validating a complete,
+        already-filled plan (the free-elective pool can genuinely be
+        checked against what was taken). Generation-time callers validate
+        an unfilled base plan and should leave this False, since the open
+        pool would always fail against a plan that hasn't had electives
+        added yet.
         """
 
         name = major["name"]
@@ -396,20 +407,14 @@ class PlannerService:
             or major_req
         )
 
-        # When validating a COMPLETE plan (keep_open_pools=True), also correct
-        # for the "over-captured required courses" data pattern: about 9.5% of
-        # majors (concentrated in postgraduate programmes - Master's, PGDip,
-        # research-heavy degrees) have scraped data listing more required
-        # courses than the degree's credit target allows for, almost always
-        # because several alternative specialisation tracks were flattened
-        # into one list rather than the degree genuinely requiring that many
-        # credits. Generation handles this with its own plan-specific trim
-        # (PlanSearch._plan_for_major); validation has no visibility into
-        # that trim (a fresh tree is rebuilt here, independent of any
-        # particular generated plan), so without this correction, validating
-        # ANY plan for such a major - even one the generator itself produced
-        # and considers complete - would report missing required courses for
-        # whichever ones happen to be outside the credit budget by sort order.
+        # When validating a complete plan, also cap required-course
+        # over-capture (some majors' data lists more required courses than
+        # the degree's credit target allows, see cap_overcaptured_required_codes).
+        # Generation handles this with its own plan-specific trim;
+        # validation rebuilds the tree independently of any particular
+        # generated plan, so without this correction it would report
+        # missing required courses for whichever ones a fresh trim happens
+        # to exclude, even for a plan the generator itself considers complete.
         if keep_open_pools:
             elective_nodes_for_cap = [
                 n for n in collect_elective_nodes(major_req)
@@ -443,7 +448,7 @@ class PlannerService:
 
         # schedulable_credits approximates the credits this major ACTUALLY
         # requires (not how many course options happen to be schedulable
-        # across all pools combined - a pool with 10 eligible 15cr courses
+        # across all pools combined. A pool with 10 eligible 15cr courses
         # but only a 60cr target should count as 60cr here, not 150cr).
         #
         # = required (non-pool) course credits
@@ -512,7 +517,7 @@ class PlannerService:
             'second_gap'      : free-elective gap for second major (credits)
             'combined_credits': total credits in the merged requirement trees
                                 (before deduplication)
-            'saved_credits'   : credits saved by deduplication (shared × credit)
+            'saved_credits'   : credits saved by deduplication (shared courses, summed credits)
 
         Raises ValueError if either major cannot be resolved or no valid plan
         can be produced for the merged working set.
@@ -537,7 +542,7 @@ class PlannerService:
         second_req = self._build_major_req_tree(second_major)
 
         # Build merged requirement tree: ALL_OF(first_req, second_req).
-        # Shared courses satisfy both subtrees - the validator checks each
+        # Shared courses satisfy both subtrees. The validator checks each
         # independently against plan.all_course_codes.
         from coursemap.domain.requirement_nodes import AllOfRequirement as _AllOf
         merged_req = _AllOf((first_req, second_req))
@@ -563,12 +568,23 @@ class PlannerService:
 
         merged_tree = _AllOf((_major_subtree(first_tree), _major_subtree(second_tree)))
 
+        # Double majors are completed within a single degree enrolment (Massey
+        # regs require both majors to belong to the same qualification), so
+        # both should report the same qual_level. Take the min defensively
+        # in case the data ever disagrees, so the stricter undergrad rule
+        # isn't accidentally skipped.
+        _first_qual = self._qual_map.get(first_major["name"])
+        _second_qual = self._qual_map.get(second_major["name"])
+        _levels = [q["level"] for q in (_first_qual, _second_qual) if q]
+        combined_qual_level = min(_levels) if _levels else None
+
         parsed_combined = [{
             "name": f"{first_major['name']} + {second_major['name']}",
             "url":  "",
             "raw":  {},
             "requirement":  merged_req,
             "degree_tree":  merged_tree,
+            "qual_level": combined_qual_level,
         }]
 
         generator_template = PlanGenerator(
@@ -602,9 +618,8 @@ class PlannerService:
             plan = type(plan)(semesters=plan.semesters, prior_completed=prior_objects)
 
         # Build info dict.
-        from coursemap.domain.requirement_utils import collect_course_codes as _ccc
-        first_codes  = _ccc(first_req)
-        second_codes = _ccc(second_req)
+        first_codes  = collect_course_codes(first_req)
+        second_codes = collect_course_codes(second_req)
         shared_codes = first_codes & second_codes
 
         saved_credits = sum(
@@ -656,10 +671,9 @@ class PlannerService:
         tree as an additional CHOOSE_CREDITS pool before re-running the full
         PlanSearch pipeline. This ensures the filled plan benefits from the same
         elective selection, prerequisite resolution, rebalancing and equalisation
-        passes as a normal plan - fixing the sparse-final-semester issue that
+        passes as a normal plan, fixing the sparse-final-semester issue that
         occurred when the filler bypassed PlanSearch.
         """
-        from collections import Counter as _Counter
         from coursemap.domain.requirement_nodes import (
             AllOfRequirement as _AllOf,
             ChooseCreditsRequirement as _CCR,
@@ -679,13 +693,47 @@ class PlannerService:
             preferred_electives=preferred_electives,
             excluded_courses=excluded_courses,
             no_summer=no_summer,
+            # This is a discovery pass: its only purpose is to find out how
+            # many credits the major's required/named-pool structure can
+            # guarantee on its own, so the real gap (to be filled with
+            # filler electives below) can be computed accurately. A named
+            # pool that can't satisfy the 45cr level-progression rule from
+            # its own members alone (see DATA_QUALITY.md, Ecology and
+            # Conservation, Psychology, Accountancy) is allowed to fall
+            # short here; the larger resulting gap gets filled in below,
+            # and the FINAL plan (after filler is injected and the search
+            # re-run) is fully revalidated with this flag off, so a plan
+            # this method actually returns is never silently incomplete.
+            _allow_level_progression_shortfall=True,
         )
+        # Capture immediately: any subsequent generate_best_plan/PlanSearch
+        # call (e.g. the double-major info lookups further down, or even
+        # this same method's own second/filled pass) overwrites
+        # self.last_needed_levels, so it must be read right here, not later.
+        needed_levels = dict(self.last_needed_levels)
+
+        # Level-distribution state (max 165cr @ L100 / min 75cr @ L300 for a
+        # standard bachelor's, see DegreeProfile in degree_rules.py): compute
+        # from the base plan's already-scheduled courses (major-required +
+        # named pools), before filler runs.
+        #
+        # dist_needed_levels is passed to ElectiveFiller as level_floor_priority,
+        # a SEPARATE parameter from needed_levels, not merged into it. Merging
+        # was tried first and caused a real starvation bug (Creative Writing,
+        # Bachelor of Arts: needed_levels ended up {100: 15, 200: 45, 300: 75},
+        # all in the same tier, which sorts level-ASC, so the L100/L200 entries
+        # consumed the whole fill budget before the ranked list ever reached the
+        # L300 candidates, even though L300 was flagged the whole time). See
+        # ElectiveFiller's class docstring (Tier 1 vs Tier 2) for the full
+        # explanation. level_credit_limits is a hard cap, not a ranking
+        # preference, so it's already always passed separately.
+        dist_needed_levels, level_credit_limits = self._level_distribution_state(major_name, base_plan)
 
         degree_total = self.degree_total_credits(major_name) if major_name else 360
 
         # Compute the true filler gap directly from the base plan's actual total.
         # base_plan.total_credits() already accounts for all prerequisite-chain
-        # courses the scheduler actually placed - no need to estimate them separately.
+        # courses the scheduler actually placed. No need to estimate them separately.
         # This avoids the "overcounting" bug where prereq extras of unreachable courses
         # (e.g. a stats course needing a non-DIS maths prerequisite) were subtracted
         # from the budget even though they were never actually scheduled.
@@ -711,7 +759,7 @@ class PlannerService:
                         if r.get("type") == "COURSE":
                             c = r.get("course_code","")
                             if c: rc.add(c)
-                        # Deliberately skip CHOOSE_CREDITS - pool options can be trimmed
+                        # Deliberately skip CHOOSE_CREDITS. Pool options can be trimmed
                         for ch in r.get("children",[]): rc |= _rdc_req_only(ch)
                         return rc
                     _direct_codes_b |= _rdc_req_only(_rr)
@@ -756,24 +804,26 @@ class PlannerService:
                 base_plan.transfer_credits = transfer_credits
             return base_plan, []
 
-        # Identify filler candidates in two passes:
-        #   Pass 1 (same-prefix): courses whose 3-digit code prefix matches
-        #           subjects already in the base plan. These are the most
-        #           relevant free electives for the student's programme.
-        #   Pass 2 (broadened): when pass 1 cannot cover the full gap, fall
-        #           back to ANY undergrad-level course in the catalogue that
-        #           is schedulable in the requested campus/mode.
-        # Both passes respect the excluded_courses list and the per-course
-        # level cap (no higher than max_level + 100 to stay broadly coherent).\
+        # Identify filler candidates via the unified ElectiveFiller path
+        # (_select_filler_codes), the same one used for double majors. This
+        # used to be a ~150-line independent implementation with its own
+        # tiering; the two diverged (this one had prereq-chain-awareness and
+        # subject_hint support that the double-major path lacked, until the
+        # unification. See CHANGELOG.md).
         planned_codes = {c.code for s in base_plan.semesters for c in s.courses}
         prior_codes   = {c.code for c in base_plan.prior_completed}
 
-        # Also exclude codes that appear in the major's own elective pools.
-        # When a pool code is also selected as a filler code it gets double-
-        # counted: the scheduler places it once but both the pool requirement
-        # and the filler pool requirement claim it, leaving the degree short
-        # of the total-credit target.  Excluding pool codes from the filler
-        # candidates prevents this overlap.
+        # Exclude all of the major's own elective-pool codes from filler
+        # candidates, not just ones already scheduled in the base plan.
+        #
+        # The filler step and the major's own named-pool selection
+        # (_select_electives) run as independent passes with no shared state.
+        # If an unscheduled pool member were left eligible as filler, both
+        # passes could end up claiming the same course toward two different
+        # targets, leaving one of them short by exactly that course's
+        # credits. Drawing filler only from outside the major (still ranked
+        # by subject-prefix/hint relevance inside ElectiveFiller) avoids that
+        # race entirely.
         resolved_for_pool = self._resolve_major(major_name) if major_name else []
         major_pool_codes: set[str] = set()
         for _m in resolved_for_pool:
@@ -783,129 +833,22 @@ class PlannerService:
                 if isinstance(_node, _CCR):
                     major_pool_codes.update(_node.course_codes)
 
-        # Exclude ALL of the major's own elective-pool codes from filler
-        # candidates, not just ones already scheduled in the base plan.
-        #
-        # An earlier version only excluded pool codes already scheduled
-        # (pool_already_planned), allowing UNSCHEDULED pool members to be
-        # picked as filler - reasoning that an extra same-subject elective is
-        # a fine choice. In practice this created a race: when
-        # generate_filled_plan re-runs the full PlanSearch pipeline with the
-        # filler pool injected, _select_electives processes the major's named
-        # pools (L200/L300 CS electives, etc.) and the new filler pool as
-        # INDEPENDENT passes with no shared memory of what the base plan
-        # already used. The named-pool pass re-derives its own credit target
-        # from scratch and, by simple sort-order coincidence, often picks the
-        # very same low-code-numbered courses the filler step had already
-        # claimed - leaving the filler pool short of ITS target. The result
-        # was a plan a few credits below the real degree total that still
-        # passed the "is anything missing" checks, because the missing
-        # credits were spread thin enough not to trip the relevant checks
-        # until full validation.
-        #
-        # Excluding all pool codes up front means the filler step always
-        # draws from genuinely outside-the-major courses (still ranked by
-        # subject-prefix relevance via prefix_rank below), which is simpler
-        # to reason about and avoids the race entirely.
-        excluded_all  = planned_codes | prior_codes | excluded_courses | major_pool_codes
-
-        prefix_counts = _Counter(code[:3] for code in planned_codes)
-
-        # Expand prefix_rank with subject_hint from the free-elective node.
-        # This ensures subjects recommended by the major (e.g. Math for CS)
-        # get Tier 2 priority even if the base plan only has 159xxx courses.
-        _hint_prefixes: list[str] = []
-        for _m in resolved_for_pool:
-            def _get_hints(req: dict) -> list:
-                h = []
-                if req.get("label", "").startswith("Free elective"):
-                    h.extend(req.get("subject_hint", []))
-                for ch in req.get("children", []):
-                    h.extend(_get_hints(ch))
-                return h
-            _hint_prefixes.extend(_get_hints(_m.get("requirement", {})))
-
-        # Add hint prefixes with low count (rank them after actual plan prefixes)
-        for _hp in _hint_prefixes:
-            if _hp not in prefix_counts:
-                prefix_counts[_hp] = 0  # ensures they appear in prefix_rank
-
-        prefix_rank   = {pfx: rank for rank, (pfx, _) in enumerate(prefix_counts.most_common())}
-        max_level = max(
-            (self.courses[c].level for c in planned_codes if c in self.courses),
-            default=100,
+        filler_codes = self._select_filler_codes(
+            planned_codes=planned_codes,
+            prior_codes=prior_codes,
+            effective_gap=effective_gap,
+            campus=campus,
+            mode=mode,
+            no_summer=no_summer,
+            preferred_electives=preferred_electives,
+            excluded_courses=excluded_courses,
+            extra_exclude=major_pool_codes,
+            major_names=[major_name] if major_name else None,
+            needed_levels=needed_levels,
+            level_credit_limits=level_credit_limits,
+            level_floor_priority=dist_needed_levels,
         )
-
-        def _is_schedulable(course) -> bool:
-            offerings = [o for o in course.offerings if o.campus == campus and o.mode == mode]
-            if not offerings:
-                return False
-            if no_summer:
-                return any(o.semester in ("S1", "S2") for o in offerings)
-            return True
-
-        def _level_ok(course) -> bool:
-            # Exclude zero-credit courses (practicum placements) - they can't
-            # satisfy credit requirements and cause the filler loop to spin.
-            if course.credits <= 0:
-                return False
-            return course.level <= 300 and course.level <= max_level + 100
-
-        # Detect prerequisite-chain courses: needed to satisfy prerequisites
-        # of major courses but not in the major requirement tree themselves.
-        # These get higher priority than random electives in filler selection.
-        prereq_chain_codes: set[str] = set()
-        def _collect_prereqs_for_filler(code: str, visited: set[str]) -> None:
-            if code in visited or code not in self.courses:
-                return
-            visited.add(code)
-            from coursemap.domain.prerequisite import CoursePrerequisite, AndExpression, OrExpression
-            prereq = self.courses[code].prerequisites
-            if prereq is None:
-                return
-            stack = [prereq]
-            while stack:
-                node = stack.pop()
-                if isinstance(node, CoursePrerequisite):
-                    child = node.code
-                    if child in self.courses and child not in excluded_all:
-                        prereq_chain_codes.add(child)
-                        _collect_prereqs_for_filler(child, visited)
-                elif isinstance(node, (AndExpression, OrExpression)):
-                    stack.extend(node.children)
-
-        for code in list(planned_codes) + list(major_pool_codes):
-            _collect_prereqs_for_filler(code, set())
-
-        # Priority tiers for filler:
-        #   0 = student explicitly preferred
-        #   1 = prerequisite chain courses (pedagogically necessary)
-        #   2 = same subject prefix (most coherent electives)
-        #   3 = full undergrad catalogue (open electives)
-        def _filler_tier(code: str) -> int:
-            if code in preferred_electives: return 0
-            if code in prereq_chain_codes: return 1
-            if code[:3] in prefix_rank: return 2
-            return 3
-
-        all_candidates: list[tuple] = []
-        for code, course in self.courses.items():
-            if code in excluded_all: continue
-            if not _is_schedulable(course): continue
-            if not _level_ok(course): continue
-            tier = _filler_tier(code)
-            sub_rank = prefix_rank.get(code[:3], 99)
-            all_candidates.append((tier, sub_rank, course.level, code))
-        all_candidates.sort()
-
-        filler_codes: list[str] = []
-        running = 0
-        for _, _, _, code in all_candidates:
-            if running >= effective_gap: break
-            cr = self.courses[code].credits
-            if running + cr > effective_gap + 14: continue
-            filler_codes.append(code)
-            running += cr
+        running = sum(self.courses[c].credits for c in filler_codes if c in self.courses)
 
         if not filler_codes:
             if transfer_credits > 0:
@@ -941,9 +884,8 @@ class PlannerService:
             name_m = m["name"]
             qual = self._qual_map.get(name_m)
             if qual is not None:
-                from coursemap.domain.requirement_utils import collect_course_codes as _ccc
-                from coursemap.rules.degree_rules import profile_for as _pfor, filter_requirement_tree as _frt
-                all_aug_codes = _ccc(augmented_req)
+                from coursemap.rules.degree_rules import filter_requirement_tree as _frt
+                all_aug_codes = collect_course_codes(augmented_req)
                 schedulable_aug = frozenset(
                     code for code in all_aug_codes
                     if code in self.courses
@@ -978,6 +920,7 @@ class PlannerService:
                 "raw":          m,
                 "requirement":  augmented_req,
                 "degree_tree":  degree_tree,
+                "qual_level":   qual["level"] if qual else None,
             })
 
         generator_template = PlanGenerator(
@@ -1010,7 +953,7 @@ class PlannerService:
             filled_plan = search.search()
         except ValueError:
             # Second-pass filling failed.
-            # Re-raise so the batch planner / UI can try another campus/mode -
+            # Re-raise so the batch planner / UI can try another campus/mode,
             # UNLESS transfer_credits make the remaining gap small enough that
             # the base plan already satisfies the degree (prior + transfer + scheduled
             # covers the credit target within 15cr).
@@ -1067,7 +1010,7 @@ class PlannerService:
                 if t == "COURSE":
                     c = req_dict.get("course_code", "")
                     if c: codes.add(c)
-                # Deliberately skip CHOOSE_CREDITS pool codes - orphaned pool
+                # Deliberately skip CHOOSE_CREDITS pool codes. Orphaned pool
                 # selections can be trimmed to hit the degree credit target.
                 for ch in req_dict.get("children", []):
                     codes |= _collect_required_codes(ch)
@@ -1106,7 +1049,7 @@ class PlannerService:
                     removed.add(code)
                     excess -= cr
                     # After removing this course, some of its prereqs may now be
-                    # orphaned - add them to the removable list if they're not
+                    # orphaned, add them to the removable list if they're not
                     # needed by any remaining course.
                     still_in_plan = plan_codes - removed
                     new_needed: set[str] = set()
@@ -1176,7 +1119,7 @@ class PlannerService:
     def required_course_codes(self, major_name: str) -> set[str]:
         """
         Return the set of course codes that are REQUIRED (ALL_OF nodes) for this
-        major - i.e. courses the student must complete, not optional elective pool
+        major: courses the student must complete, not optional elective pool
         entries.
 
         Used to detect campus/mode unavailability warnings: if a required course
@@ -1298,8 +1241,71 @@ class PlannerService:
         )
 
     # ------------------------------------------------------------------
-    # Elective filler - shared by both single and double major fill logic
+    # Elective filler, shared by both single and double major fill logic
     # ------------------------------------------------------------------
+
+    def _level_distribution_state(
+        self, major_name: str | None, base_plan: "DegreePlan",
+    ) -> tuple[dict[int, int], dict[int, int]]:
+        """
+        Compute how much room/shortfall remains against the degree's
+        level-distribution profile (DegreeProfile.max_level_100 /
+        min_level_300 / min_level_400 in degree_rules.py), given what's
+        already scheduled in base_plan (major-required courses plus any
+        named elective pool selections, before filler runs).
+
+        Returns (level_floor_priority, level_credit_limits):
+          - level_floor_priority: {level: shortfall_credits} for levels
+            below their minimum (e.g. {300: 15} if the plan is 15cr short
+            of min_level_300). Pass this to _select_filler_codes/
+            ElectiveFiller as level_floor_priority, a SEPARATE parameter
+            from needed_levels (the 45cr level-progression rule's shortfall
+            dict), never merged into it: ElectiveFiller gives each its own
+            tier specifically because merging them caused a real starvation
+            bug, see ElectiveFiller's class docstring (Tier 1 vs Tier 2) and
+            DATA_QUALITY.md's "Level Distribution" section for the full story.
+          - level_credit_limits: {level: max_additional_credits} for levels
+            with a ceiling (currently just 100). Passed straight through to
+            ElectiveFiller.select_to_fill's level_credit_limits, which
+            enforces it as a hard cap during selection, not just a ranking
+            preference, see that method's docstring for why a cap needs to
+            be a hard stop rather than a deprioritisation.
+
+        Returns ({}, {}) if major_name has no resolvable qualification, or
+        if that qualification's profile has no level-distribution rules at
+        all (e.g. postgraduate quals, see profile_for). This is the same
+        "only enforce when we actually know the target" caution
+        build_degree_tree itself uses for TotalCreditsRequirement.
+        """
+        if not major_name:
+            return {}, {}
+        qual = self._qual_map.get(major_name)
+        if qual is None:
+            return {}, {}
+        profile = profile_for(qual["level"], qual["length"])
+        if profile.max_level_100 is None and profile.min_level_300 is None and profile.min_level_400 is None:
+            return {}, {}
+
+        existing_by_level: dict[int, int] = {}
+        for semester in base_plan.semesters:
+            for course in semester.courses:
+                existing_by_level[course.level] = existing_by_level.get(course.level, 0) + course.credits
+        for course in base_plan.prior_completed:
+            existing_by_level[course.level] = existing_by_level.get(course.level, 0) + course.credits
+
+        level_floor_priority: dict[int, int] = {}
+        for level, floor in ((300, profile.min_level_300), (400, profile.min_level_400)):
+            if floor is None:
+                continue
+            shortfall = floor - existing_by_level.get(level, 0)
+            if shortfall > 0:
+                level_floor_priority[level] = shortfall
+
+        level_credit_limits: dict[int, int] = {}
+        if profile.max_level_100 is not None:
+            level_credit_limits[100] = max(0, profile.max_level_100 - existing_by_level.get(100, 0))
+
+        return level_floor_priority, level_credit_limits
 
     def _select_filler_codes(
         self,
@@ -1312,14 +1318,59 @@ class PlannerService:
         preferred_electives: frozenset,
         excluded_courses: frozenset,
         extra_exclude: set[str] | None = None,
+        major_names: list[str] | None = None,
+        needed_levels: dict[int, int] | None = None,
+        level_credit_limits: dict[int, int] | None = None,
+        level_floor_priority: dict[int, int] | None = None,
     ) -> list[str]:
         """
         Delegate elective selection to ElectiveFiller.
 
         Returns a list of course codes whose total credits <= effective_gap.
-        Uses the same tier-ranked strategy (preferred > same-prefix > adjacent)
-        for both single and double major plans - eliminating the duplication
-        between generate_filled_plan and generate_filled_double_major_plan.
+        Uses the same tier-ranked strategy (preferred > distribution-floor >
+        level-gate > prereq-chain > same-prefix/hint > adjacent > broad) for
+        every plan-filling path: single major, double major. This used to be
+        two independently diverging implementations (this method plus a
+        ~250-line inline duplicate in generate_filled_plan); see
+        CHANGELOG.md.
+
+        major_names: resolved major name(s) this plan is for. Used to walk
+        their own elective-pool codes for prereq-chain candidates (pool
+        members can have prereqs even before they're scheduled) and to pull
+        each major's subject_hint entries (e.g. "Math for CS") so they rank
+        alongside the plan's own dominant subject, not just whatever's
+        already scheduled. Optional, omitting it just means Tier 4/Tier 5
+        are derived purely from planned_codes, same as before this was added.
+
+        needed_levels: {level: shortfall_credits} from
+        PlannerService.last_needed_levels (set by generate_filled_plan's
+        discovery pass, see _repair_level_progression). Tells ElectiveFiller
+        to prioritise candidates at these levels (Tier 2, above ordinary
+        subject-relevance ranking) so the filler step actually closes the
+        major's own level-progression gate, instead of just filling the
+        credit gap with whatever's cheapest. Without this, the credit TOTAL
+        can come out exactly right while the major's named pools remain
+        unsatisfied. See CHANGELOG.md, "ElectiveFiller Level-Gate
+        Awareness", for how this was found (a 25-major sample showed 10 hit
+        exactly this).
+
+        level_floor_priority: {level: shortfall_credits} from
+        _level_distribution_state, e.g. {300: 15} if the plan is 15cr short
+        of the degree's min_level_300 floor. Tells ElectiveFiller to
+        prioritise candidates at these levels too, but via its OWN tier
+        (Tier 1, above needed_levels' Tier 2), NOT merged into
+        needed_levels: needed_levels routinely flags several lower levels at
+        once and its tier sorts level-ASC internally, so a higher-level
+        distribution floor merged into it would get starved out before the
+        greedy selection loop ever reached it (found via a real-dataset
+        case, Creative Writing, Bachelor of Arts: see ElectiveFiller's class
+        docstring for the full mechanism).
+
+        level_credit_limits: {level: max_additional_credits} from
+        _level_distribution_state, e.g. {100: 30} if only 30 more credits
+        of filler can go at L100 before hitting the degree's max_level_100
+        ceiling. Passed straight through to ElectiveFiller.select_to_fill
+        as a hard selection-time cap, see that method's docstring.
         """
         exclude_all = planned_codes | prior_codes | excluded_courses | (extra_exclude or set())
         available = frozenset(planned_codes | prior_codes)
@@ -1328,9 +1379,31 @@ class PlannerService:
             (self.courses[c].level for c in planned_codes if c in self.courses),
             default=100,
         )
-        level_cap = max_level + 200  # generous cap
+        # Also consider needed_levels/level_floor_priority when computing the
+        # cap: a major whose discovery pass dropped all its L300 selections
+        # (so planned_codes tops out at L200), or a degree that's short of
+        # its min_level_300 floor, still needs L300 candidates to be in
+        # scope. Capping at planned_codes' own max_level alone would exclude
+        # exactly the level either mechanism needs to re-add.
+        if needed_levels:
+            max_level = max(max_level, max(needed_levels))
+        if level_floor_priority:
+            max_level = max(max_level, max(level_floor_priority))
+        # Cap at 400 (exclusive, max recommended level is 300) even if
+        # max_level+200 would allow higher: L400/honours-level courses often
+        # carry admission requirements beyond simple prerequisites (GPA
+        # thresholds, department approval) that aren't modelled in the
+        # prerequisite data, so they're not safe to recommend as generic
+        # free-elective filler. Matches the pre-unification inline behaviour.
+        level_cap = min(max_level + 200, 400)
 
-        filler = ElectiveFiller(self.courses, campus=campus, mode=mode)
+        chain_seed_codes, hint_prefixes = self._filler_context_for_majors(major_names)
+        # Always include planned_codes in the chain walk even if major_names
+        # wasn't resolvable for some reason, matches the inline implementation's
+        # behaviour of always walking at least what's actually scheduled.
+        chain_seed_codes = list(set(chain_seed_codes) | planned_codes)
+
+        filler = ElectiveFiller(self.courses, campus=campus, mode=mode, no_summer=no_summer)
         selected = filler.select_to_fill(
             seed_codes=list(planned_codes),
             completed=available,
@@ -1338,6 +1411,12 @@ class PlannerService:
             exclude=frozenset(exclude_all),
             prefer=frozenset(preferred_electives),
             level_cap=level_cap,
+            chain_seed_codes=chain_seed_codes,
+            hint_prefixes=hint_prefixes,
+            overshoot_tolerance=14,
+            needed_levels=needed_levels,
+            level_credit_limits=level_credit_limits,
+            level_floor_priority=level_floor_priority,
         )
 
         # Pass 2 (broadened): if Pass 1 didn't fill the budget, try any undergrad
@@ -1347,8 +1426,51 @@ class PlannerService:
         if selected_cr < effective_gap:
             remaining_budget = effective_gap - selected_cr
             already_selected = frozenset(selected)
-            broader_filler = ElectiveFiller(self.courses, campus=campus, mode=mode)
-            # Use empty seed_codes so no prefix is "top" - all undergrad courses are candidates
+
+            already_by_level: dict[int, int] = {}
+            if needed_levels or level_credit_limits or level_floor_priority:
+                for code in selected:
+                    c = self.courses.get(code)
+                    if c:
+                        already_by_level[c.level] = already_by_level.get(c.level, 0) + c.credits
+
+            # Recompute remaining need: Pass 1 may have already closed some
+            # or all of the gate (e.g. selected a full 45cr of L200), so
+            # Pass 2 shouldn't keep over-prioritising a level that's no
+            # longer short.
+            remaining_needed_levels = None
+            if needed_levels:
+                remaining_needed_levels = {
+                    lvl: amt - already_by_level.get(lvl, 0)
+                    for lvl, amt in needed_levels.items()
+                    if amt - already_by_level.get(lvl, 0) > 0
+                } or None
+
+            # Same recompute for the distribution floor: if Pass 1 already
+            # reached (or exceeded) it, Pass 2 shouldn't keep treating that
+            # level as under-served.
+            remaining_level_floor_priority = None
+            if level_floor_priority:
+                remaining_level_floor_priority = {
+                    lvl: amt - already_by_level.get(lvl, 0)
+                    for lvl, amt in level_floor_priority.items()
+                    if amt - already_by_level.get(lvl, 0) > 0
+                } or None
+
+            # Recompute remaining room the same way: Pass 1 may have already
+            # used up some or all of a level's cap, so Pass 2 must not
+            # re-grant the full original limit (that would let the combined
+            # two passes exceed the cap even though each pass individually
+            # respected it).
+            remaining_level_credit_limits = None
+            if level_credit_limits:
+                remaining_level_credit_limits = {
+                    lvl: max(0, limit - already_by_level.get(lvl, 0))
+                    for lvl, limit in level_credit_limits.items()
+                }
+
+            broader_filler = ElectiveFiller(self.courses, campus=campus, mode=mode, no_summer=no_summer)
+            # Use empty seed_codes so no prefix is "top". All undergrad courses are candidates
             broader = broader_filler.select_to_fill(
                 seed_codes=[],
                 completed=available | already_selected,
@@ -1356,10 +1478,54 @@ class PlannerService:
                 exclude=frozenset(exclude_all) | already_selected,
                 prefer=frozenset(preferred_electives),
                 level_cap=min(level_cap, 400),
+                overshoot_tolerance=14,
+                needed_levels=remaining_needed_levels,
+                level_credit_limits=remaining_level_credit_limits,
+                level_floor_priority=remaining_level_floor_priority,
             )
             selected = selected + broader
 
         return selected
+
+    def _filler_context_for_majors(
+        self, major_names: list[str] | None,
+    ) -> tuple[list[str], list[str]]:
+        """
+        For each resolved major name, collect its elective-pool codes (for
+        prereq-chain walking) and its subject_hint prefixes (for Tier 2
+        ranking). Returns (chain_seed_codes, hint_prefixes). Empty lists if
+        major_names is None or doesn't resolve. Callers degrade gracefully
+        to the pre-unification behaviour in that case.
+        """
+        if not major_names:
+            return [], []
+
+        from coursemap.domain.requirement_utils import collect_elective_nodes as _cen
+        from coursemap.domain.requirement_nodes import ChooseCreditsRequirement as _CCR
+
+        pool_codes: set[str] = set()
+        hint_prefixes: list[str] = []
+
+        for name in major_names:
+            resolved = self._resolve_major(name)
+            if not resolved:
+                continue
+            m = resolved[0]
+            req_tree = self._build_major_req_tree(m)
+            for node in _cen(req_tree):
+                if isinstance(node, _CCR):
+                    pool_codes.update(node.course_codes)
+
+            def _get_hints(req: dict) -> list:
+                h = []
+                if req.get("label", "").startswith("Free elective"):
+                    h.extend(req.get("subject_hint", []))
+                for ch in req.get("children", []):
+                    h.extend(_get_hints(ch))
+                return h
+            hint_prefixes.extend(_get_hints(m.get("requirement", {})))
+
+        return list(pool_codes), hint_prefixes
 
     def generate_filled_double_major_plan(
         self,
@@ -1380,12 +1546,12 @@ class PlannerService:
         """
         Generate a combined double-major plan and auto-fill the free-elective gap.
 
-        The combined gap is calculated as:
-            max(first_degree_total, second_degree_total)
-            - schedulable credits from merged requirement tree
-
-        This ensures the student meets the higher degree's credit requirement
-        (typically both are 360cr) while counting shared courses only once.
+        The degree target is whichever is larger: the qualification minimum
+        (e.g. 360cr for a BSc) or the credits actually needed to satisfy
+        both majors' requirement trees once shared courses are deduplicated.
+        Two majors with little subject overlap can genuinely need more than
+        the qualification minimum. Filler only ever tops up to this target,
+        it never removes courses either requirement tree depends on.
 
         Returns (plan, double_info, filler_codes).
         """
@@ -1413,25 +1579,15 @@ class PlannerService:
         )
 
         # --- Step 2: compute gap ---------------------------------------------
-        # IMPORTANT: degree_target is the qualification's graduation minimum
-        # (e.g. 360cr for a BSc) - it is NOT the minimum credits required to
-        # satisfy BOTH majors' requirement trees. Two real majors with little
-        # subject overlap routinely need MORE than the single-degree minimum
-        # once their distinct compulsory/elective-pool courses are summed,
-        # even after deduplicating shared courses.
-        #
-        # A previous version of this method treated `degree_target` as a hard
-        # ceiling and deleted required courses from the combined plan whenever
-        # the genuinely-required course load exceeded it. That produced plans
-        # which passed their own credit-total check but FAILED the degree
-        # validator (missing required elective-pool credits for one of the
-        # two majors) - i.e. a plan that looked complete but wasn't. See
-        # tests/test_double_major_trim_regression.py for the regression case.
-        #
-        # The correct floor is whichever is larger: the qualification minimum,
-        # or the credits the base (unfilled) plan actually needed to satisfy
-        # both requirement trees. We only ever ADD filler to reach this floor;
-        # we never remove courses the requirement trees say are needed.
+        # degree_target is NOT simply the qualification minimum (e.g. 360cr
+        # for a BSc). Two majors with little subject overlap routinely need
+        # more than that once their distinct required/elective-pool courses
+        # are combined, even after deduplicating shared courses. The floor is
+        # whichever is larger: the qualification minimum, or what the base
+        # (unfilled) plan actually needs to satisfy both requirement trees.
+        # Filler is only ever added to reach this floor, never used as an
+        # excuse to drop courses the requirement trees say are needed. See
+        # test_double_major_does_not_delete_required_courses_to_fit_minimum.
         first_total  = self.degree_total_credits(major_name)
         second_total = self.degree_total_credits(second_major_name)
         qualification_minimum = max(first_total, second_total)
@@ -1465,6 +1621,14 @@ class PlannerService:
                 if isinstance(_node, _CCR):
                     dm_pool_codes.update(_node.course_codes)
 
+        # Level-distribution state, keyed off the first major's qualification.
+        # A double major is one qualification with two majors attached (e.g.
+        # both within the same BSc), not two separate degree-wide profiles,
+        # so using major_name here rather than trying to reconcile both is a
+        # reasonable simplification, not an oversight; see
+        # _level_distribution_state's docstring.
+        dist_needed_levels, level_credit_limits = self._level_distribution_state(major_name, base_plan)
+
         filler_codes = self._select_filler_codes(
             planned_codes=planned_codes,
             prior_codes=prior_codes,
@@ -1475,6 +1639,9 @@ class PlannerService:
             preferred_electives=preferred_electives,
             excluded_courses=excluded_courses,
             extra_exclude=(dm_pool_codes & planned_codes),  # only exclude already-planned pool codes
+            major_names=[major_name, second_major_name],
+            level_credit_limits=level_credit_limits,
+            level_floor_priority=dist_needed_levels,
         )
         running = sum(self.courses[c].credits for c in filler_codes if c in self.courses)
 
@@ -1513,12 +1680,18 @@ class PlannerService:
             _major_subtree(second_tree),
         ))
 
+        _first_qual = self._qual_map.get(first_major["name"])
+        _second_qual = self._qual_map.get(second_major["name"])
+        _levels = [q["level"] for q in (_first_qual, _second_qual) if q]
+        combined_qual_level = min(_levels) if _levels else None
+
         parsed_combined = [{
             "name": f"{first_major['name']} + {second_major['name']}",
             "url":  "",
             "raw":  {},
             "requirement":  merged_req,
             "degree_tree":  merged_tree,
+            "qual_level": combined_qual_level,
         }]
 
         generator_template = PlanGenerator(
@@ -1578,7 +1751,6 @@ class PlannerService:
         )
         if filled_dm_total > degree_target:
             dm_excess = filled_dm_total - degree_target
-            dm_filler_set = set(filler_codes)
             dm_plan_codes = {c.code for s in filled_plan.semesters for c in s.courses}
             from coursemap.domain.prerequisite import (
                 CoursePrerequisite as _CP4,

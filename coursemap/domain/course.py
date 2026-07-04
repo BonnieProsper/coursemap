@@ -4,6 +4,21 @@ from dataclasses import dataclass, field
 
 from .prerequisite import PrerequisiteExpression
 
+SEMESTER_ORDER: dict[str, int] = {"S1": 0, "S2": 1, "SS": 2}
+
+
+def sort_semesters(semesters) -> list[str]:
+    """
+    Sort an iterable of semester codes into calendar order (S1, S2, SS).
+
+    Plain alphabetical sort happens to produce this same order for these
+    three specific strings (ASCII '1' < '2' < 'S'), which is easy to rely on
+    without realizing it's a coincidence rather than a guarantee. Fragile
+    if a new semester code were ever introduced that didn't happen to sort
+    the same way alphabetically. This makes the intended order explicit.
+    """
+    return sorted(set(semesters), key=lambda s: SEMESTER_ORDER.get(s, 99))
+
 
 @dataclass(frozen=True)
 class Offering:

@@ -31,31 +31,19 @@ def _collect_claimed_codes(
     credits_by_code: dict[str, int] | None = None,
 ) -> set[str]:
     """
-    Collect course codes "claimed" by a specific requirement elsewhere in the
-    tree, so an open free-elective pool ("choose any 150cr") only counts
-    plan credits that aren't already being counted toward something more
-    specific. Without this, a course could satisfy both its own
-    CourseRequirement AND count a second time toward an unrelated open pool.
+    Collect course codes already claimed by a specific requirement, so an
+    open elective pool doesn't double-count credits a course is already
+    satisfying elsewhere.
 
-    CourseRequirement codes are always claimed (the course is mandatory
-    regardless of what else is in the plan).
+    CourseRequirement codes are always claimed. For pool requirements
+    (ChooseCreditsRequirement, ChooseNRequirement, MinLevelCreditsFromRequirement),
+    only as many plan members as the pool's own credit target needs are
+    claimed. Extra eligible courses beyond that target are left free to
+    count toward an open pool instead.
 
-    For ChooseCreditsRequirement/ChooseNRequirement/MinLevelCreditsFromRequirement
-    pools, only as many of the plan's actual pool members as the pool's own
-    target requires are claimed - not every possible pool member. A pool
-    listing 10 eligible courses against a 60cr (4-course) target doesn't
-    "use up" all 10 just by them being eligible; if the plan happens to
-    schedule 5 of them (e.g. due to prerequisite-chain expansion adding one
-    beyond what the target strictly needed), only 4 are claimed and the 5th
-    is free to count toward the open pool - it's functioning as a de facto
-    free elective in practice, and should be credited as one.
-
-    `plan_codes`: the plan's course codes, in a stable order (so claiming is
-    deterministic). `credits_by_code`: credits for each code, used to know
-    when a pool's target has been reached. When either is None, falls back
-    to claiming every named pool member (the conservative behaviour) - used
-    by callers that only have the tree and not an actual plan to check pool
-    membership against.
+    `plan_codes` and `credits_by_code` let claiming be computed against an
+    actual plan; when either is None, every named pool member is claimed
+    (the conservative fallback, for callers with only the tree).
     """
     claimed: set[str] = set()
     stack = [node]
@@ -250,7 +238,7 @@ def _check(
     if isinstance(node, AnyOfRequirement):
         if node.is_satisfied(plan):
             return True
-        # None of the branches satisfied - collect errors from all of them.
+        # None of the branches satisfied. Collect errors from all of them.
         branch_errors: list[str] = []
         for child in node.children:
             _check(child, plan, branch_errors, claimed)

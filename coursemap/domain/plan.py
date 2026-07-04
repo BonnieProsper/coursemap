@@ -64,7 +64,7 @@ class DegreePlan:
         """
         if name in ("semesters", "prior_completed") and hasattr(self, "all_course_codes"):
             raise AttributeError(
-                f"Cannot reassign DegreePlan.{name} after construction - "
+                f"Cannot reassign DegreePlan.{name} after construction. "
                 "all_course_codes would become stale. "
                 "Create a new DegreePlan instance instead."
             )

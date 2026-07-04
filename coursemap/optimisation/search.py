@@ -39,10 +39,7 @@ from collections.abc import Iterable
 from coursemap.domain.course import Course
 from coursemap.domain.plan import DegreePlan
 from coursemap.domain.requirement_nodes import (
-    AllOfRequirement,
-    AnyOfRequirement,
     ChooseCreditsRequirement,
-    MajorRequirement,
     RequirementNode,
 )
 from coursemap.domain.requirement_utils import (
@@ -57,7 +54,7 @@ from coursemap.domain.prerequisite import (
     OrExpression as _OrExpression,
 )
 from coursemap.domain.prerequisite_utils import prereqs_met
-from coursemap.planner.generator import PlanGenerator
+from coursemap.planner.generator import PlanGenerator, _LEVEL_PROGRESSION_GATE
 from coursemap.optimisation.scorer import PlanScorer
 from coursemap.validation.engine import DegreeValidator
 from coursemap.rules.degree_rules import filter_requirement_tree as _frt
@@ -75,31 +72,12 @@ def _estimate_chain_cost(
 ) -> int:
     """
     Estimate the additional credits required to satisfy `code`'s prerequisite
-    chain, beyond codes already in `already_counted` (e.g. the major's own
-    required-course list). Used by the required-courses credit-cap trim in
-    _plan_for_major to account for the fact that keeping a `tree_required`
-    course can commit the plan to extra, not-independently-required
-    prerequisite courses - credits that the trim's cost accounting would
-    otherwise miss entirely, since it previously only counted each kept
-    course's own credits.
+    chain, beyond codes already in `already_counted`.
 
-    This is a simpler, standalone estimate - not the same machinery as
-    _build_working_set's full chain expansion, which also accounts for
-    prior_completed and the final all_codes set (neither of which exist yet
-    at the point this estimate needs to run, since this estimate is what
-    determines required_codes in the first place). For OR-prerequisites,
-    picks whichever branch is already in `already_counted` (free) if one
-    exists, otherwise the lowest-level branch (cheapest, matching the same
-    heuristic _build_working_set itself uses for the same case).
-
-    This is intentionally a slight overestimate in rare cases (e.g. it can't
-    know a later step will independently add a course that would have made
-    this chain free) - overestimating chain cost during the trim's budget
-    calculation is the safe direction: it means the trim reserves slightly
-    more room than strictly necessary for tree_required courses, which can
-    only make the elective pool's actual share smaller than ideal, never
-    cause a tree_required course to be incorrectly dropped (which is the
-    failure mode that made the earlier, reverted fix attempt unsafe).
+    For OR-prerequisites, picks a branch already in `already_counted` if one
+    exists, otherwise the lowest-level branch. May overestimate slightly in
+    rare cases; that's the safe direction here, since this feeds a budget
+    reservation for required courses rather than a hard limit.
     """
     if visited is None:
         visited = set()
@@ -150,36 +128,19 @@ def _collect_course_node_codes(node: RequirementNode) -> set[str]:
 
 def _resolve_or_prerequisite(prereq, working_codes: set[str]):
     """
-    Rewrite an OrExpression so it references only the branch actually present
-    in the working set, when exactly that situation applies - leaving
-    everything else (AndExpression, fully-resolved OrExpression, fully
-    external OrExpression, None) unchanged.
+    Collapse an OR-prerequisite to its single resolved branch when exactly
+    one branch is present in `working_codes`.
 
-    Background: PlanSearch._build_working_set's prerequisite-chain expansion
-    deliberately adds only ONE branch of a course's OR prerequisite to the
-    working set (to avoid scheduling an unneeded sibling course). That leaves
-    the course's ORIGINAL OrExpression intact, with the unchosen sibling
-    branch absent from the working set - indistinguishable, from inside
-    prereqs_met() or the rebalancer's _prereq_codes_or_aware(), from a
-    genuine external admission-gatekeeper code (which is also legitimately
-    absent and meant to be treated as pre-satisfied). That ambiguity let the
-    OR be satisfied vacuously via the absent sibling, regardless of whether
-    the chosen branch had actually been scheduled.
+    The working-set builder deliberately includes only one branch of an OR
+    prerequisite (to avoid scheduling an unneeded sibling course). Left
+    unresolved, the unchosen branch's absence is indistinguishable from a
+    genuine external prerequisite (e.g. an admission requirement), which
+    would let the OR be satisfied vacuously regardless of whether the chosen
+    branch was actually completed. Resolving it here removes that ambiguity.
 
-    This function resolves the ambiguity using the context available here
-    (which branch the expansion actually chose): if exactly one top-level
-    CoursePrerequisite child of an OR is in `working_codes` and at least one
-    sibling is not, return a prerequisite referencing only that one chosen
-    branch. If zero or more-than-one children are in `working_codes`, the
-    expression is left unchanged (zero = the whole OR is external, handled
-    correctly already; more-than-one = no ambiguity, any of them being
-    completed satisfies the OR, which is exactly what the unmodified
-    OrExpression already does).
-
-    Only direct CoursePrerequisite children are considered for resolution -
-    nested expressions within a branch are left as-is, since the bug this
-    fixes only arises from the top-level OR-of-courses pattern that
-    _build_working_set's expansion explicitly optimises for.
+    Only direct CoursePrerequisite children are resolved; nested expressions
+    are left as-is. AndExpression, None, and already-unambiguous
+    OrExpressions pass through unchanged.
     """
     if prereq is None:
         return prereq
@@ -198,6 +159,75 @@ def _resolve_or_prerequisite(prereq, working_codes: set[str]):
             return prereq
         return _AndExpression(new_children)
     return prereq
+
+
+def _unreachable_reason(
+    course: "Course | None",
+    campus: str,
+    mode: str,
+    no_summer: bool,
+) -> str | None:
+    """
+    Classify why a required course has no offering in the working set, so a
+    validation failure can tell the student something actionable instead of
+    a bare "missing required course X".
+
+    Returns None if the course has a valid offering for this campus/mode/
+    no_summer combination (it isn't this function's job to explain,
+    something else dropped it). Otherwise returns a short, human-readable
+    reason string.
+
+    Checked in order of specificity: a course can fail more than one of
+    these at once (e.g. SS-only AND a different campus), but the message
+    should lead with whichever fact is most actionable for the student.
+    """
+    if course is None:
+        return "the course code was not found in the dataset (a data gap, not a scheduling choice)"
+
+    if not course.offerings:
+        return "it has no recorded offering at any campus or mode (a data gap, check the course's Massey page)"
+
+    matching_campus_mode = [o for o in course.offerings if o.campus == campus and o.mode == mode]
+    if not matching_campus_mode:
+        available = sorted({f"{o.campus}/{o.mode}" for o in course.offerings})
+        return (
+            f"it is not offered as {campus}/{mode}, only {', '.join(available)} "
+            f"({'try a different --campus/--mode' if available else 'no offerings recorded'})"
+        )
+
+    if no_summer and all(o.semester == "SS" for o in matching_campus_mode):
+        return (
+            f"it is only offered in Summer School (SS) at {campus}/{mode}, and Summer School "
+            f"is disabled (--no-summer). Pass --allow-summer, or take this course over summer"
+        )
+
+    return None
+
+
+def explain_missing_required_codes(
+    missing_codes: Iterable[str],
+    all_courses: dict[str, "Course"],
+    campus: str,
+    mode: str,
+    no_summer: bool,
+) -> list[str]:
+    """
+    Build one human-readable explanation per missing required course code,
+    using _unreachable_reason where it applies and a generic fallback
+    otherwise (e.g. the course was schedulable but a prerequisite chain or
+    credit cap pushed it out, a real planning conflict, not an offering gap).
+    """
+    explanations: list[str] = []
+    for code in sorted(missing_codes):
+        course = all_courses.get(code)
+        reason = _unreachable_reason(course, campus, mode, no_summer)
+        if reason is None:
+            reason = (
+                "it was schedulable but didn't fit. Likely a prerequisite chain, "
+                "credit cap, or elective-pool conflict elsewhere in the plan"
+            )
+        explanations.append(f"{code} is missing because {reason}.")
+    return explanations
 
 
 class PlanSearch:
@@ -221,6 +251,7 @@ class PlanSearch:
         prior_completed: frozenset[str] = frozenset(),
         preferred_electives: frozenset[str] = frozenset(),
         excluded_courses: frozenset[str] = frozenset(),
+        allow_level_progression_shortfall: bool = False,
     ):
         self.courses = courses
         self.majors = majors
@@ -228,6 +259,24 @@ class PlanSearch:
         self.prior_completed = prior_completed
         self.preferred_electives = preferred_electives
         self.excluded_courses = excluded_courses
+        # When True, a named elective pool that cannot satisfy the 45cr
+        # level-progression rule from its own pool members alone is allowed
+        # to fall short of its credit target in THIS plan, rather than
+        # failing the whole search. Used only by generate_filled_plan's
+        # internal discovery pass (see _repair_level_progression and
+        # _plan_for_major), the credit shortfall this produces becomes
+        # part of the gap that generate_filled_plan's open-pool filler step
+        # fills in next, after which the plan is regenerated and validated
+        # normally (with this flag off), so a final, returned plan is
+        # never silently incomplete; only the discardable discovery pass is.
+        self.allow_level_progression_shortfall = allow_level_progression_shortfall
+        # Populated by _repair_level_progression when it has to give up on a
+        # gate (whether or not allow_shortfall lets it drop the unschedulable
+        # selection): {level: shortfall_credits} for the caller, typically
+        # generate_filled_plan, to feed into ElectiveFiller's needed_levels
+        # so the filler step actually closes the gap instead of papering
+        # over it with whatever's cheapest. See PlannerService.last_needed_levels.
+        self.last_needed_levels: dict[int, int] = {}
         self.best_generator_stats = None
 
         # Diagnostics
@@ -273,21 +322,129 @@ class PlanSearch:
     # Per-major planning
     # ------------------------------------------------------------------
 
+    def _cap_required_codes(
+        self,
+        required_codes: set[str],
+        elective_nodes: list,
+        degree_tree: RequirementNode,
+        degree_total: int,
+        campus: str,
+        mode: str,
+    ) -> tuple[set[str], bool]:
+        """
+        Cap `required_codes` at the degree's credit target when the major's
+        data over-captures (lists more required courses than the degree
+        actually needs. Common when several alternative specialisation
+        tracks were scraped as one flat list).
+
+        Codes the degree tree checks as COURSE nodes (`tree_required`) are
+        never dropped, including the estimated cost of any prerequisite
+        they pull in that isn't itself independently required. Otherwise
+        that chain cost goes uncounted here and silently eats into the
+        elective pool's budget later. Only genuinely droppable excess
+        (non-tree-required codes) is trimmed, by priority: in the degree
+        tree, schedulable, lower level, then code for determinism.
+
+        Returns (codes_to_use, was_capped).
+        """
+        if degree_total <= 0:
+            return required_codes, False
+
+        req_total = sum(
+            self.courses[c].credits for c in required_codes if c in self.courses
+        )
+        # Pool contribution this major's electives will actually deliver
+        # (DIS-capped at each pool's stated target), so required courses
+        # only get budget room the pools can't fill themselves.
+        schedulable_pool_contribution = sum(
+            min(
+                n.credits,
+                sum(
+                    self.courses[c].credits for c in n.course_codes
+                    if c in self.courses
+                    and any(o.campus == campus and o.mode == mode
+                            for o in self.courses[c].offerings)
+                ),
+            )
+            for n in elective_nodes
+        )
+        req_budget = (
+            max(0, degree_total - schedulable_pool_contribution)
+            if req_total + schedulable_pool_contribution > degree_total
+            else degree_total
+        )
+        if req_total <= req_budget:
+            return required_codes, False
+
+        tree_required = _collect_course_node_codes(degree_tree)
+
+        def _req_sort(code: str) -> tuple:
+            c = self.courses.get(code)
+            if c is None:
+                return (1, 2, 999, code)
+            in_tree = 0 if code in tree_required else 1
+            has_matching = any(o.campus == campus and o.mode == mode for o in c.offerings)
+            return (in_tree, 0 if has_matching else 1, c.level, code)
+
+        tree_required_in_codes = sorted(
+            (c for c in required_codes if c in tree_required), key=_req_sort
+        )
+        non_tree_required = sorted(
+            (c for c in required_codes if c not in tree_required), key=_req_sort
+        )
+
+        capped: set[str] = set()
+        running = 0
+        already_counted: set[str] = set(tree_required_in_codes)
+        for code in tree_required_in_codes:
+            c = self.courses.get(code)
+            if c is None:
+                continue
+            capped.add(code)
+            running += c.credits + _estimate_chain_cost(code, self.courses, already_counted)
+        for code in non_tree_required:
+            if running >= req_budget:
+                break
+            c = self.courses.get(code)
+            if c is None:
+                continue
+            capped.add(code)
+            running += c.credits
+
+        return capped, True
+
     def _plan_for_major(self, major: dict) -> tuple[DegreePlan, PlanGenerator]:
         """
         Build and validate a plan for one major.
 
         Steps:
           1. Collect required course codes (COURSE nodes only, not pool members).
+          1b. Cap required codes at the degree credit target, if over-captured.
           2. Select elective courses from each pool using the greedy strategy.
-          3. Remove any courses already completed by the student.
-          4. Run the scheduler.
-          5. Validate against the degree tree.
+          3. Build the working set (required + selected electives, minus prior).
+          4. Check prerequisite feasibility before running the scheduler.
+          5. Run the scheduler.
           6. Attach prior-completed course objects to the plan.
+          7. Validate against the degree tree.
         """
         degree_tree: RequirementNode = major["degree_tree"]
         major_req: RequirementNode = major["requirement"]
         name: str = major["name"]
+
+        # The 45cr level-progression rule (General Regulations for
+        # Undergraduate Degrees, Undergraduate Diplomas, Undergraduate
+        # Certificates, Graduate Diplomas, and Graduate Certificates) applies
+        # to undergraduate/graduate qualifications (NZQF level <= 7) only.
+        # Postgraduate diplomas/certificates/masters (level 8+) are gated by
+        # programme admission instead, and routinely include required L300
+        # courses with no L200 prerequisite chain at all (e.g. Master of
+        # Specialist Teaching). Applying the undergrad rule there produces
+        # false unschedulable-major failures. qual_level is None when a
+        # major has no qualification match in qualifications.json; default
+        # to enforcing the rule in that case (the safer assumption, since
+        # most unmatched majors in the dataset are undergraduate).
+        qual_level = major.get("qual_level")
+        enforce_level_progression = qual_level is None or qual_level <= 7
 
         # Step 1: separate required (COURSE nodes) from elective pool codes.
         # collect_course_codes returns ALL codes in the tree including pool members.
@@ -301,115 +458,12 @@ class PlanSearch:
         required_codes = all_major_codes - pool_codes
 
         # Step 1b: cap required_codes at the degree credit target.
-        #
-        # The scraper sometimes over-captures: for a 120cr Honours degree it
-        # may record every course in a subject department as required. The degree
-        # tree carries the correct target via TotalCreditsRequirement.
-        #
-        # When required_codes credits exceed the degree target, we trim to the
-        # minimum needed, but we MUST keep every code that the (filtered) degree
-        # tree explicitly checks as a COURSE node -- dropping those would fail
-        # validation. filter_requirement_tree already stripped unschedulable
-        # courses, so degree-tree COURSE nodes are exactly what must be planned.
         degree_total = find_total_credits(degree_tree)
         campus = self.generator_template.campus
         mode   = self.generator_template.mode
-
-        required_was_capped = False
-        if degree_total > 0:
-            req_total = sum(
-                self.courses[c].credits for c in required_codes if c in self.courses
-            )
-            # Compute the pool's schedulable credit contribution (DIS only),
-            # capped at each pool's stated target. This is what the pools will
-            # actually contribute to the plan after _select_electives runs.
-            schedulable_pool_contribution = sum(
-                min(
-                    n.credits,
-                    sum(
-                        self.courses[c].credits for c in n.course_codes
-                        if c in self.courses
-                        and any(o.campus == campus and o.mode == mode
-                                for o in self.courses[c].offerings)
-                    ),
-                )
-                for n in elective_nodes
-            )
-
-            # Cap required_codes when required + actual pool contribution overflow
-            # the degree total. We reserve exactly what pools can deliver so pools
-            # are always satisfiable at their full (DIS-capped) target, and required
-            # courses fill the remainder.
-            req_budget = (
-                max(0, degree_total - schedulable_pool_contribution)
-                if req_total + schedulable_pool_contribution > degree_total
-                else degree_total
-            )
-            if req_total > req_budget:
-                required_was_capped = True
-                # Priority order: schedulable > non-schedulable, lower-level > higher,
-                # in-degree-tree > not, then lexicographic for determinism.
-                tree_required = _collect_course_node_codes(degree_tree)
-
-                def _req_sort(code: str) -> tuple:
-                    c = self.courses.get(code)
-                    if c is None:
-                        return (1, 2, 999, code)
-                    in_tree = 0 if code in tree_required else 1
-                    has_matching = any(
-                        o.campus == campus and o.mode == mode for o in c.offerings
-                    )
-                    return (in_tree, 0 if has_matching else 1, c.level, code)
-
-                # tree_required codes can NEVER be dropped - the (filtered)
-                # degree tree explicitly checks them as COURSE nodes, and
-                # dropping one would fail validation. So they're reserved
-                # first, unconditionally, INCLUDING their estimated
-                # prerequisite-chain cost (a course not independently
-                # required by the major, but needed to satisfy a
-                # tree_required course's prerequisite - e.g. 175101, pulled
-                # in only because 175201 requires it). Without counting this
-                # chain cost here, the trim would only count each kept
-                # course's own credits, and _build_working_set would later
-                # add the uncounted chain courses anyway - silently eating
-                # into credits that were supposed to be reserved for the
-                # elective pool. Found auditing Security Studies – Graduate
-                # Diploma in Arts and Educational Psychology – Diploma in
-                # Arts, both of which came up short on their elective pool
-                # by exactly their chain-expansion's credit cost.
-                #
-                # Only after tree_required's full cost is reserved does any
-                # REMAINING budget go to droppable over-capture excess
-                # (non-tree-required codes) - these are genuinely safe to
-                # drop, since validation doesn't depend on them.
-                tree_required_in_codes = sorted(
-                    (c for c in required_codes if c in tree_required), key=_req_sort
-                )
-                non_tree_required = sorted(
-                    (c for c in required_codes if c not in tree_required), key=_req_sort
-                )
-
-                capped: set[str] = set()
-                running = 0
-                already_counted: set[str] = set(tree_required_in_codes)
-                for code in tree_required_in_codes:
-                    c = self.courses.get(code)
-                    if c is None:
-                        continue
-                    capped.add(code)
-                    running += c.credits + _estimate_chain_cost(
-                        code, self.courses, already_counted
-                    )
-                for code in non_tree_required:
-                    if running >= req_budget:
-                        break
-                    c = self.courses.get(code)
-                    if c is None:
-                        continue
-                    capped.add(code)
-                    running += c.credits
-                required_codes = capped
-
+        required_codes, required_was_capped = self._cap_required_codes(
+            required_codes, elective_nodes, degree_tree, degree_total, campus, mode,
+        )
 
         # Step 2: select electives from each pool.
         # Pass the degree credit target so pools with credits=0 (not yet
@@ -442,11 +496,11 @@ class PlanSearch:
 
         # When the major includes an open free-elective pool ("choose any
         # Ncr"), that pool has no fixed course list for _select_electives to
-        # draw from - it isn't even included in pure_elective_nodes below
+        # draw from. It isn't even included in pure_elective_nodes below
         # (its course_codes is empty). If elective_budget includes the open
         # pool's share, _select_electives' top-up pass has no way to "spend"
         # that share on the open pool, so it spends it on the NAMED pools
-        # instead - over-selecting them well past their own stated targets.
+        # instead, over-selecting them well past their own stated targets.
         # That produces a plan that reaches the right TOTAL credits but never
         # actually uses any genuine free electives, silently masking the open
         # pool requirement instead of satisfying it.
@@ -500,7 +554,7 @@ class PlanSearch:
         # consume the elective budget.
         #
         # When elective_budget == 0, the required courses already fill the degree
-        # total. Pool selection is suppressed entirely - adding pools on top would
+        # total. Pool selection is suppressed entirely. Adding pools on top would
         # overcredit the plan. The degree tree has already been re-filtered above
         # to remove pool validation nodes in this case.
         pool_credit_scale = 0 if (degree_total > 0 and elective_budget == 0) else 1
@@ -522,6 +576,27 @@ class PlanSearch:
         # but treated as electives by the working set builder.
         elective_codes = elective_codes | always_include_in_pool
 
+        # Cross-pool level-progression repair (see _repair_level_progression):
+        # each pool above was selected independently, so the combined set can
+        # end up short on L100/L200 credit relative to the L200/L300 credit
+        # it also contains, unschedulable in any valid order, not just an
+        # ordering the greedy generator happened to pick. Only applies to
+        # undergraduate/graduate majors (enforce_level_progression, computed
+        # at the top of this method from qual_level).
+        if enforce_level_progression:
+            already_have = required_codes | elective_codes | frozenset(self.prior_completed)
+            repaired = self._repair_level_progression(
+                already_have, elective_nodes,
+                always_keep=required_codes | always_include_in_pool | frozenset(self.prior_completed),
+                degree_total=degree_total,
+                allow_shortfall=self.allow_level_progression_shortfall,
+            )
+            # Only the pool-derived additions/removals are reflected back into
+            # elective_codes. required_codes and prior_completed are passed
+            # in purely so the repair sees the full picture, not as things it
+            # should ever add to or remove from elective_codes itself.
+            elective_codes = (repaired - required_codes - frozenset(self.prior_completed)) | always_include_in_pool
+
         # Step 3: build working set = required + selected electives, minus prior
         working_set = self._build_working_set(
             required_codes, elective_codes, self.prior_completed
@@ -533,6 +608,35 @@ class PlanSearch:
             # Give a specific reason so the CLI can surface a useful message.
             all_codes_count = len(required_codes | elective_codes)
             if all_codes_count == 0:
+                if self.allow_level_progression_shortfall:
+                    # This is generate_filled_plan's discovery pass, and
+                    # _repair_level_progression's allow_shortfall path
+                    # dropped every pool selection it had (e.g. Finance –
+                    # Bachelor of Business: ALL of its named-pool courses
+                    # are L200/L300 with zero L100 members at all, so the
+                    # L200 gate itself can never be satisfied from the
+                    # named pools, and the cascade drops everything). A
+                    # required_codes-only major (none here) would still
+                    # have something to schedule; an all-pool, all-blocked
+                    # major like this one genuinely has nothing yet, which
+                    # is a valid, if extreme, discovery-pass outcome: it
+                    # just means the WHOLE degree_total becomes the gap for
+                    # generate_filled_plan's filler step to cover, starting
+                    # from open-pool L100 courses. Return an empty-but-valid
+                    # plan rather than raising; the caller computes the gap
+                    # from base_plan.total_credits(), which correctly comes
+                    # out as 0 here, and the real (non-discovery) re-run
+                    # afterward validates at full strictness as normal.
+                    empty_plan = DegreePlan(
+                        semesters=(), prior_completed=tuple(
+                            self.courses[c] for c in self.prior_completed if c in self.courses
+                        ),
+                    )
+                    empty_generator = PlanGenerator(
+                        {}, campus=campus, mode=mode,
+                        no_summer=self.generator_template.no_summer,
+                    )
+                    return empty_plan, empty_generator
                 raise ValueError(
                     "No courses left to schedule after excluding prior-completed."
                 )
@@ -571,7 +675,7 @@ class PlanSearch:
         working_credits = sum(c.credits for c in working_set.values())
         # Effective per-semester credit capacity: the lesser of the credit cap
         # and what max_courses_per_semester can deliver. When max_courses=2 and
-        # all courses are 15cr, each semester holds at most 30cr - not 60cr.
+        # all courses are 15cr, each semester holds at most 30cr, not 60cr.
         _max_courses = self.generator_template.max_courses
         if _max_courses is not None:
             _min_cr = min((c.credits for c in working_set.values() if c.credits > 0), default=15)
@@ -579,11 +683,16 @@ class PlanSearch:
         else:
             _effective_cap = self.generator_template.max_credits
         min_sems = math.ceil(working_credits / max(1, _effective_cap))
-        # Safety multiplier: allow 2.5× the theoretical minimum, but at least 16
-        # semesters (8 years) and at most 32 (16 years - an absolute ceiling).
+        # Safety multiplier: allow 2.5x the theoretical minimum, but at least 16
+        # semesters (8 years) and at most 32 (16 years, an absolute ceiling).
         # The old flat 24 was too small for some postgrad programmes (e.g. 480cr PhDs)
         # and too large a safety net for short diplomas (e.g. 120cr PGCert).
         dynamic_max_semesters = max(16, min(32, math.ceil(min_sems * 2.5)))
+
+        required_zero_credit_codes = frozenset(
+            code for code in required_codes
+            if code in working_set and working_set[code].credits == 0
+        )
 
         generator = PlanGenerator(
             working_set,
@@ -596,6 +705,8 @@ class PlanSearch:
             prior_completed=self.prior_completed,
             max_semesters=dynamic_max_semesters,
             no_summer=self.generator_template.no_summer,
+            required_zero_credit_codes=required_zero_credit_codes,
+            enforce_level_progression=enforce_level_progression,
         )
         # Propagate filler_codes from the template so the generator's sort key
         # schedules required courses before filler electives. Without this the
@@ -621,7 +732,7 @@ class PlanSearch:
                 transfer_credits=plan.transfer_credits,
             )
 
-        # Step 7: validate - skip only the specific COURSE nodes for codes the
+        # Step 7: validate. Skip only the specific COURSE nodes for codes the
         # student deliberately excluded. The user was warned before generation;
         # we still show the plan but note the unsatisfied requirements.
         validator = DegreeValidator(degree_tree)
@@ -635,18 +746,74 @@ class PlanSearch:
                 if e.startswith("Missing required course ")
                 and e.split()[-1].rstrip(".") in self.excluded_courses
             ]
-            non_excl_errors = [e for e in result.errors if e not in excluded_missing]
-            if non_excl_errors:
-                raise ValueError(
-                    f"Plan for '{name}' failed degree validation: {'; '.join(non_excl_errors)}"
-                )
-            # All errors are from student-excluded required courses - log and continue.
-            logger.debug(
-                "Plan for '%s' is missing %d excluded required course(s): %s",
-                name,
-                len(excluded_missing),
-                ", ".join(e.split()[-1].rstrip(".") for e in excluded_missing),
+            # When this is generate_filled_plan's discovery pass
+            # (allow_level_progression_shortfall=True), _repair_level_progression
+            # may have deliberately left a named pool short of its own target
+            # rather than deadlocking the generator (see that function's
+            # allow_shortfall parameter). Tolerate exactly that error shape,
+            # not ANY elective-pool shortfall, only ones this same pass
+            # explicitly chose to allow, since the caller (generate_filled_plan)
+            # is about to recompute and recover the resulting larger gap via
+            # its own filler step, then regenerate and fully revalidate with
+            # this flag off. A plan returned to any OTHER caller always goes
+            # through this validation at full strictness.
+            pool_shortfall = (
+                [
+                    e for e in result.errors
+                    if e.startswith("Elective pool: have ") and "cr, need " in e
+                ]
+                if self.allow_level_progression_shortfall
+                else []
             )
+            non_excl_errors = [
+                e for e in result.errors
+                if e not in excluded_missing and e not in pool_shortfall
+            ]
+            if non_excl_errors:
+                # "Missing required course X." errors are common but unhelpful on
+                # their own. They don't say *why* X never made it into the plan.
+                # Swap each one for an explanation (no campus/mode offering,
+                # SS-only while --no-summer is set, or a genuine scheduling
+                # conflict) so the student knows what to actually do about it.
+                missing_codes = [
+                    e.split()[-1].rstrip(".")
+                    for e in non_excl_errors
+                    if e.startswith("Missing required course ")
+                ]
+                other_errors = [
+                    e for e in non_excl_errors
+                    if not e.startswith("Missing required course ")
+                ]
+                explained = explain_missing_required_codes(
+                    missing_codes,
+                    self.courses,
+                    self.generator_template.campus,
+                    self.generator_template.mode,
+                    self.generator_template.no_summer,
+                ) if missing_codes else []
+                raise ValueError(
+                    f"Plan for '{name}' failed degree validation: "
+                    f"{'; '.join(explained + other_errors)}"
+                )
+            # All errors are tolerated ones (student-excluded required courses,
+            # and/or, only when allow_level_progression_shortfall, named pool
+            # shortfalls deliberately left by _repair_level_progression's
+            # allow_shortfall path). Log and continue.
+            if excluded_missing:
+                logger.debug(
+                    "Plan for '%s' is missing %d excluded required course(s): %s",
+                    name,
+                    len(excluded_missing),
+                    ", ".join(e.split()[-1].rstrip(".") for e in excluded_missing),
+                )
+            if pool_shortfall:
+                logger.debug(
+                    "Plan for '%s' has %d named elective pool(s) short of "
+                    "their own target (tolerated: discovery pass for "
+                    "generate_filled_plan, expected to be recovered by the "
+                    "filler step): %s",
+                    name, len(pool_shortfall), "; ".join(pool_shortfall),
+                )
 
         # Trim plan to degree_total credits.
         # The working-set prereq expansion may add more courses than needed.
@@ -700,7 +867,6 @@ class PlanSearch:
 
                 protected_trim = (required_codes | always_include_in_pool | non_elective_needed)
                 # Pool courses are removable (from end of pool, higher-level first)
-                # Non-pool extras that are not protected are also removable
                 removable_pool = sorted(
                     [c for s in plan.semesters for c in s.courses
                      if c.code in elective_codes
@@ -708,6 +874,8 @@ class PlanSearch:
                      and c.code not in self.preferred_electives],
                     key=lambda c: (-c.level, c.code),
                 )
+                # Non-pool extras (prerequisite-chain courses pulled in only
+                # because some other plan course needs them).
                 removable_extras = sorted(
                     [c for s in plan.semesters for c in s.courses
                      if c.code not in protected_trim
@@ -716,12 +884,43 @@ class PlanSearch:
                     key=lambda c: (-c.level, c.code),
                 )
                 removed: set[str] = set()
-                for candidate in removable_extras + removable_pool:
-                    if excess <= 0:
+                remaining_excess = excess
+                # Pass 1: remove pool courses first (they have alternates,
+                # so they're the right place to look for excess before
+                # touching prerequisite-chain extras).
+                for candidate in removable_pool:
+                    if remaining_excess <= 0:
                         break
                     if candidate.code not in removed:
                         removed.add(candidate.code)
-                        excess -= candidate.credits
+                        remaining_excess -= candidate.credits
+                # Pass 2: recompute what's still needed from the SURVIVING
+                # plan (pool removals already applied) before deciding which
+                # extras to cut. An extra needed only by a pool course that
+                # was itself just removed is correctly still removable; an
+                # extra needed by a surviving pool course is now protected,
+                # non_elective_needed (computed before any removal) can't
+                # tell this on its own, since it skips pool courses entirely.
+                removable_extra_codes = {ex.code for ex in removable_extras}
+                surviving_needed: set[str] = set()
+                for s in plan.semesters:
+                    for c in s.courses:
+                        if c.code in removed or c.prerequisites is None:
+                            continue
+                        stk = [c.prerequisites]
+                        while stk:
+                            node = stk.pop()
+                            if isinstance(node, _CPt) and node.code in removable_extra_codes:
+                                surviving_needed.add(node.code)
+                            elif isinstance(node, (_ANDt, _ORt)):
+                                stk.extend(node.children)
+                for candidate in removable_extras:
+                    if remaining_excess <= 0:
+                        break
+                    if candidate.code in removed or candidate.code in surviving_needed:
+                        continue
+                    removed.add(candidate.code)
+                    remaining_excess -= candidate.credits
                 if removed:
                     from coursemap.domain.plan import SemesterPlan
                     new_sems = []
@@ -759,7 +958,7 @@ class PlanSearch:
         Choose courses from elective pools using a greedy, delivery-mode-aware strategy.
 
         Selection prioritises courses that are schedulable in the configured campus/mode.
-        Credit targets are satisfied using schedulable credits only - non-schedulable
+        Credit targets are satisfied using schedulable credits only. Non-schedulable
         courses will be dropped by _build_working_set, so counting them toward a credit
         target produces plans that fail validation. Non-schedulable courses are still
         included as a fallback when a pool cannot be satisfied by schedulable courses
@@ -851,7 +1050,7 @@ class PlanSearch:
 
             # Part I/II pair detection: before greedy sweep, check whether any
             # pair of courses that are explicitly "Part I" + "Part II" of the same
-            # title meets the credit target. If so, prefer that pair - it avoids
+            # title meets the credit target. If so, prefer that pair, it avoids
             # mixing parts from different thesis tracks (e.g. taking the 90cr thesis
             # Part I alongside the 120cr thesis Part I, which is nonsensical).
             #
@@ -911,7 +1110,7 @@ class PlanSearch:
                         accumulated_sched += course.credits
 
             if accumulated_sched < effective_target and effective_target > 0:
-                # Not enough schedulable courses - include everything and let
+                # Not enough schedulable courses. Include everything and let
                 # filter_requirement_tree cap the validation target.
                 logger.debug(
                     "Elective pool needs %dcr (effective %dcr) but only %dcr schedulable "
@@ -1026,6 +1225,305 @@ class PlanSearch:
                 selected.update(c for c in node.course_codes if c in self.courses)
 
         return selected
+
+    def _repair_level_progression(
+        self,
+        selected_codes: frozenset[str],
+        elective_nodes: list[ChooseCreditsRequirement],
+        always_keep: frozenset[str],
+        degree_total: int,
+        allow_shortfall: bool = False,
+    ) -> frozenset[str]:
+        """
+        Cross-pool repair for the 45cr level-progression rule (see
+        _LEVEL_PROGRESSION_GATE in coursemap.planner.generator).
+
+        _select_electives processes each elective pool independently, so it
+        has no way to know that pool A's L300 selections need pool B's L200
+        selections to reach 45cr first. Each pool just picks its own
+        cheapest valid subset. The result can be a selected set that is
+        mathematically unschedulable in ANY order: not enough L100/L200
+        credit anywhere in the set to legally unlock the L200/L300 credit
+        that's also in the set (confirmed against real majors: Ecology and
+        Conservation, Psychology, see DATA_QUALITY.md).
+
+        IMPORTANT: a course's pool membership is specific. A course only
+        counts toward the credit target of pools that actually list it, so
+        a swap can only ever trade one course for ANOTHER COURSE IN THE SAME
+        POOL. Pulling in an L200 course from an unrelated pool to "cover"
+        another pool's L300 shortfall would silently break that other
+        pool's own target instead of fixing anything (caught via
+        test_filled_plan_reaches_degree_target[English...] during
+        development. The first, pool-blind version of this function did
+        exactly that). The cumulative level-credit shortfall is checked
+        across the whole selected set (since that's what the gate actually
+        enforces), but every repair swap is scoped to a single pool, and
+        only proceeds if that pool can supply both sides of the trade.
+
+        allow_shortfall: if no in-pool swap exists and this is True, the
+        unschedulable higher-level selections for the affected pool(s) are
+        DROPPED rather than left in place (which would deadlock the
+        generator outright). This leaves the named pool short of its own
+        credit target. The caller is expected to tolerate exactly that
+        specific validation error and recover the shortfall elsewhere (see
+        generate_filled_plan, the only caller that sets this). Default
+        False preserves the original strict behaviour for ordinary,
+        single-pass plan generation: an unfixable shortfall is left as-is
+        and surfaces as a deadlock the normal way.
+
+        If no in-pool swap exists anywhere that improves the shortfall:
+          - allow_shortfall=False (default): the set is returned unchanged
+            that genuinely means the major cannot be completed from its
+            required + pool courses alone in a single pass (e.g. Chinese –
+            Bachelor of Arts, where the required course list only reaches
+            30cr at L200 with no pool path to the missing 15cr, full stop,
+            no open pool exists there either, so there's nothing
+            generate_filled_plan could supply afterward anyway). Surfaces
+            as a clear scheduling error.
+          - allow_shortfall=True: the unschedulable higher-level selections
+            are dropped from the set instead, leaving the affected pool(s)
+            short of their own credit target in this pass.
+
+        always_keep: required (non-pool) codes and always-include codes,
+        never removed by the swap (or the allow_shortfall drop), even if
+        they're high-level.
+        """
+        selected = set(selected_codes)
+        campus = self.generator_template.campus
+        mode   = self.generator_template.mode
+
+        def is_schedulable(code: str) -> bool:
+            if code in self.excluded_courses:
+                return False
+            c = self.courses.get(code)
+            return c is not None and any(
+                o.campus == campus and o.mode == mode for o in c.offerings
+            )
+
+        def _total_shortfall(level_credits: dict[int, int]) -> int:
+            """
+            Sum of unsatisfied credit across every gate, given a level credit
+            map. Used to ensure a swap makes real forward progress rather than
+            trading one gate's shortfall for another's (the Psychology
+            oscillation found during development: L100<->L200 swapped back
+            and forth forever, each swap satisfying one gate while exactly
+            re-breaking the other, since Psychology's pool requires L200
+            credit to come from the same 45cr budget as its L100 credit and
+            satisfying the L300-needs-L200 gate and the L200-needs-L100 gate
+            simultaneously needs MORE total pool credit than the pool's own
+            target allows, confirmed mathematically unsolvable earlier this
+            audit). A swap is only accepted if it strictly reduces this total;
+            otherwise it's not real progress and must be rejected, leaving
+            the loop to fall through to the allow_shortfall drop path (or
+            the hard-stop) instead of cycling forever.
+            """
+            total = 0
+            for gated_level, (required, gate_level) in _LEVEL_PROGRESSION_GATE.items():
+                if level_credits.get(gated_level, 0) <= 0:
+                    continue
+                have = level_credits.get(gate_level, 0)
+                if have < required:
+                    total += required - have
+            return total
+
+        for _ in range(12):  # bounded: a handful of swaps/drops across all pools+gate levels
+            level_credits: dict[int, int] = {}
+            for code in selected:
+                c = self.courses.get(code)
+                if c is not None and is_schedulable(code):
+                    level_credits[c.level] = level_credits.get(c.level, 0) + c.credits
+            shortfall_before = _total_shortfall(level_credits)
+
+            # Find the lowest gated level that's short, so repairs happen
+            # bottom-up (fixing L200 first can also help L300 next pass).
+            shortfall_level: int | None = None
+            shortfall_gate_level: int | None = None
+            shortfall_amount = 0
+            for gated_level in sorted(_LEVEL_PROGRESSION_GATE):
+                required, gate_level = _LEVEL_PROGRESSION_GATE[gated_level]
+                if level_credits.get(gated_level, 0) <= 0:
+                    continue  # nothing selected at this level, no gate to satisfy
+                have = level_credits.get(gate_level, 0)
+                if have < required:
+                    shortfall_level = gated_level
+                    shortfall_gate_level = gate_level
+                    shortfall_amount = required - have
+                    break
+
+            if shortfall_level is None:
+                break  # all gates satisfied (or nothing to gate)
+
+            # Try each pool that contains an unselected course at
+            # shortfall_gate_level as the source of a same-pool swap. A pool
+            # only qualifies if removing the chosen higher-level course and
+            # adding the lower-level one leaves THAT POOL's own schedulable
+            # credit total at or above its own target.
+            swapped = False
+            for node in elective_nodes:
+                if node.credits <= 0:
+                    continue  # only known-target pools can be safely rebalanced
+
+                pool_codes = set(node.course_codes)
+                add_candidates = sorted(
+                    (
+                        c for c in pool_codes
+                        if c not in selected
+                        and c in self.courses
+                        and self.courses[c].level == shortfall_gate_level
+                        and is_schedulable(c)
+                    ),
+                    key=lambda c: self.courses[c].credits,
+                )
+                if not add_candidates:
+                    continue
+
+                pool_selected_credit = sum(
+                    self.courses[c].credits for c in pool_codes
+                    if c in selected and c in self.courses and is_schedulable(c)
+                )
+
+                # A safe removal candidate is any already-selected, non-kept
+                # course in this pool that is NOT at shortfall_gate_level
+                # (removing more of the level we're trying to add more of
+                # would be self-defeating). It doesn't have to be at
+                # shortfall_level specifically, e.g. Psychology's 45cr pool
+                # mixes L100 and L200 courses with no L300 member at all, so
+                # the only valid swap is L100-out/L200-in within that one
+                # pool, never touching the separate L300 pool. Prefer
+                # removing the highest-level candidate first, since pools are
+                # typically structured low-to-high and the top of the range
+                # already selected is the most replaceable without affecting
+                # a different gate.
+                remove_candidates = sorted(
+                    (
+                        c for c in pool_codes
+                        if c in selected
+                        and c not in always_keep
+                        and c in self.courses
+                        and self.courses[c].level != shortfall_gate_level
+                    ),
+                    key=lambda c: (-self.courses[c].level, -self.courses[c].credits),
+                )
+                if not remove_candidates:
+                    # Nothing in this pool can be safely dropped. Adding
+                    # without a same-pool removal would grow this pool past
+                    # its own credit target, which silently breaks downstream
+                    # gap/budget accounting that assumes each pool stays at
+                    # its target (see test_filled_plan_reaches_degree_target
+                    # regression hit during development: an earlier version
+                    # of this swap allowed pools to overshoot, which threw
+                    # off generate_filled_plan's gap calculation by exactly
+                    # the overshoot amount). Try the next pool instead.
+                    continue
+
+                for add_code in add_candidates:
+                    add_credits = self.courses[add_code].credits
+                    for drop_code in remove_candidates:
+                        drop_credits = self.courses[drop_code].credits
+                        new_pool_total = pool_selected_credit + add_credits - drop_credits
+                        if new_pool_total < node.credits:
+                            continue  # this pool's own target would break
+
+                        # Tentatively apply the swap and check it actually
+                        # makes net progress across ALL gates, not just the
+                        # one we were targeting, otherwise this can oscillate
+                        # forever (Psychology: L100<->L200 swap each fixing
+                        # one gate while re-breaking the other, found during
+                        # development). Reject and try the next candidate if
+                        # the total shortfall doesn't strictly improve.
+                        tentative_level_credits = dict(level_credits)
+                        tentative_level_credits[self.courses[drop_code].level] = (
+                            tentative_level_credits.get(self.courses[drop_code].level, 0)
+                            - drop_credits
+                        )
+                        tentative_level_credits[shortfall_gate_level] = (
+                            tentative_level_credits.get(shortfall_gate_level, 0)
+                            + add_credits
+                        )
+                        if _total_shortfall(tentative_level_credits) >= shortfall_before:
+                            continue  # no net progress, try the next candidate
+
+                        selected.discard(drop_code)
+                        selected.add(add_code)
+                        logger.debug(
+                            "Level-progression repair (pool target %dcr): "
+                            "swapped out %s (L%d) for %s (L%d) to cover "
+                            "%dcr shortfall at L%d.",
+                            node.credits, drop_code, self.courses[drop_code].level,
+                            add_code, shortfall_gate_level,
+                            shortfall_amount, shortfall_gate_level,
+                        )
+                        swapped = True
+                        break
+                    if swapped:
+                        break
+                if swapped:
+                    break
+
+            if not swapped:
+                # Record this gate's shortfall regardless of allow_shortfall.
+                # generate_filled_plan reads self.last_needed_levels after its
+                # discovery-pass call (the one that actually sets
+                # allow_shortfall=True) to tell ElectiveFiller's filler step
+                # which level to specifically prioritise, so the gap it fills
+                # actually closes the gate instead of just hitting the right
+                # credit TOTAL with the wrong levels (the bug this whole
+                # mechanism exists to fix. See CHANGELOG.md, "ElectiveFiller
+                # Level-Gate Awareness"). Accumulate rather than overwrite,
+                # in case multiple gates are short across repair iterations.
+                self.last_needed_levels[shortfall_gate_level] = (
+                    self.last_needed_levels.get(shortfall_gate_level, 0) + shortfall_amount
+                )
+                if allow_shortfall:
+                    # Drop every droppable (not in always_keep) selection at
+                    # shortfall_level, across every pool, not just the pool
+                    # this iteration happened to be examining, since the
+                    # gate is checked against the cumulative credit total
+                    # across the WHOLE selected set, not per-pool. Leaving
+                    # any of them in place would still deadlock the
+                    # generator (it gates on the same cumulative total).
+                    dropped = {
+                        c for c in selected
+                        if c not in always_keep
+                        and c in self.courses
+                        and self.courses[c].level == shortfall_level
+                    }
+                    if dropped:
+                        selected -= dropped
+                        logger.debug(
+                            "Level-progression repair (allow_shortfall): no "
+                            "in-pool swap available to cover a %dcr shortfall "
+                            "at L%d, dropped %d unschedulable L%d "
+                            "selection(s) instead: %s. The pool(s) they came "
+                            "from will report short of their own credit "
+                            "target; generate_filled_plan is expected to "
+                            "recover the resulting larger gap via its filler "
+                            "step, then regenerate and fully revalidate.",
+                            shortfall_amount, shortfall_gate_level,
+                            len(dropped), shortfall_level, sorted(dropped),
+                        )
+                        continue  # re-check from the top, dropping L300 might also fix an L200-vs-L100 shortfall
+                    # Nothing droppable either (everything's in always_keep).
+                    # fall through to the same hard-stop as the non-shortfall
+                    # case; allow_shortfall can't help if there's truly
+                    # nothing to drop or swap.
+                logger.debug(
+                    "Level-progression repair: no in-pool swap available to "
+                    "cover a %dcr shortfall at L%d; major may be genuinely "
+                    "unsolvable from its named pools alone. (An open/free-"
+                    "elective pool, if present, is deliberately NOT used as "
+                    "a fallback source here, confirmed via Finance "
+                    "Bachelor of Business during development that doing so "
+                    "breaks generate_filled_plan's two-pass architecture: "
+                    "open-pool additions made during the base-plan repair "
+                    "aren't tracked in major_pool_codes, so the base-plan "
+                    "and filled-plan passes can independently make different "
+                    "repair choices and net out short of the degree total.)",
+                    shortfall_amount, shortfall_gate_level,
+                )
+                break
+
+        return frozenset(selected)
 
     def _elective_sort_key(self, code: str) -> tuple:
         """
@@ -1155,13 +1653,13 @@ class PlanSearch:
                     for child in node.children:
                         if isinstance(child, CoursePrerequisite):
                             if child.code in prior_completed or child.code in all_codes:
-                                return set()  # satisfied - no expansion needed
+                                return set()  # satisfied, no expansion needed
                     # Pick the branch with the lowest level (simplest prereq)
                     def _branch_cost(child) -> int:
                         if isinstance(child, CoursePrerequisite):
                             c = self.courses.get(child.code)
                             return c.level if c else 999
-                        return 500  # nested expression - deprioritise
+                        return 500  # nested expression, deprioritise
                     best = min(node.children, key=_branch_cost)
                     return _expand_node(best)
                 return set()
@@ -1191,30 +1689,8 @@ class PlanSearch:
             )
         }
 
-        # --- Resolve ambiguous OR-prerequisites against the final working set ---
-        #
-        # The OR-expansion above (_expand_node) deliberately adds only ONE
-        # branch of a course's OR prerequisite to the working set, to avoid
-        # bloating the plan with an unneeded sibling course. But this leaves
-        # the course's ORIGINAL prerequisite expression untouched - still a
-        # full OrExpression with the unchosen sibling branch absent from
-        # `working`. Downstream, prereqs_met() and the rebalancer's
-        # _prereq_codes_or_aware() both treat "absent from known" as
-        # "pre-satisfied" (correct for genuine external gatekeeper codes,
-        # e.g. admission requirements that never appear as schedulable
-        # courses) - but from inside those generic functions, an absent
-        # OR-sibling looks IDENTICAL to a genuine external gatekeeper. That
-        # ambiguity let the OR be treated as vacuously satisfied via the
-        # "absent" sibling, regardless of whether the CHOSEN branch (the one
-        # actually present in the working set) had been scheduled yet.
-        #
-        # Resolving it here, with the full context of which branch was
-        # actually chosen, removes the ambiguity at its source: replace the
-        # course's prerequisite with just the resolved branch whenever
-        # exactly one top-level OR branch ended up in `working` and at least
-        # one sibling did not. A genuinely external OR (no branch in
-        # `working` at all) is left untouched, since that case is correctly
-        # handled as "fully outside this plan's scope" already.
+        # Resolve OR-prerequisites against the final working set. See
+        # _resolve_or_prerequisite for why this is needed.
         resolved_working: dict[str, Course] = {}
         for code, course in working.items():
             new_prereq = _resolve_or_prerequisite(course.prerequisites, set(working))
