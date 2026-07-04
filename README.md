@@ -1,6 +1,6 @@
 # CourseMap v7
 
-Unofficial Massey University degree planner. Plan a full bachelor's degree - single or double major - see prerequisite chains, browse courses, and export your plan for an advisor meeting.
+Unofficial Massey University degree planner. Plan a full bachelor's degree, single or double major, see prerequisite chains, browse courses, and export your plan for an advisor meeting.
 
 **⚠ Unofficial tool. Always verify your plan with Massey University and your academic advisor before enrolling.**
 
@@ -9,7 +9,7 @@ Unofficial Massey University degree planner. Plan a full bachelor's degree - sin
 ## Quick start
 
 ```powershell
-cd coursemap_v7
+cd coursemap
 pip install -e ".[all]"
 python -m uvicorn coursemap.api.server:app --reload --port 8000
 ```
@@ -20,7 +20,7 @@ Open http://localhost:8000
 
 ## After running the prerequisite scraper
 
-The dataset ships with ~36% prerequisite coverage for L200+ courses. Running the scraper fills this to ~90%+ with real AND/OR logic from Massey's course pages:
+The dataset ships with ~66% prerequisite coverage for L200+ courses. Running the scraper fills in most of the remaining gaps with real AND/OR logic from Massey's course pages:
 
 ```powershell
 python scripts/run_all_data_refresh.py   # ~30 min, requires internet
@@ -39,7 +39,7 @@ Or just restart: `python -m uvicorn coursemap.api.server:app --reload --port 800
 ## What's in v7
 
 ### Bug fixes
-- `full_year` flag added to `Offering` - "Full Year" courses (must enrol S1+S2 as a unit) are now distinguished from "Double Semester" courses (can take either). Plans warn you when full-year courses appear.
+- `full_year` flag added to `Offering`. "Full Year" courses (must enrol S1+S2 as a unit) are now distinguished from "Double Semester" courses (can take either). Plans warn you when full-year courses appear.
 - `transfer_credits` now validated with an upper bound of 360 (previously unbounded).
 - `_svc._specs_cache` monkey-patch replaced with a clean module-level `_specs_cache_store` dict.
 - `no_summer` defaults to `True` in both the API schema and UI checkbox (Summer School is opt-in).
@@ -58,18 +58,18 @@ Or just restart: `python -m uvicorn coursemap.api.server:app --reload --port 800
 | `GET /api/minors?data_quality=inferred` | Filter minors by scraped vs inferred data quality |
 
 ### New services
-- `DegreeInfoService` - focused read-only queries: total credits, free elective gap, required codes, prereq coverage
-- `PlanExportService` - formats stored plans as plain text or Markdown (no HTTP dependency)
-- `plan_store.async_get / async_put` - non-blocking wrappers using `asyncio.to_thread`
+- `DegreeInfoService`: focused read-only queries (total credits, free elective gap, required codes, prereq coverage)
+- `PlanExportService`: formats stored plans as plain text or Markdown (no HTTP dependency)
+- `plan_store.async_get / async_put`: non-blocking wrappers using `asyncio.to_thread`
 
 ### UI improvements
-- **Full Year badge** - `FY` pill on course cards where full-year enrolment is required
+- **Full Year badge**: `FY` pill on course cards where full-year enrolment is required
 - **Gap banner** now includes a human-readable `gap_explanation` from the API, plus action buttons ("Auto-fill" and "Add second major")
 - **⇄ Compare** button opens a side-by-side major comparison table
 - **↓ Advisor** button downloads plain-text plan summary
 - **↓ MD** button downloads Markdown plan export
 - **Semester filter pills** in course browser modal (All / Sem 1 / Sem 2 / Summer)
-- **Visual prereq graph** button in course drawer - opens a layered SVG DAG in a new window
+- **Visual prereq graph** button in course drawer, opens a layered SVG DAG in a new window
 - Prerequisites chain section now has a "Visual prereq graph ↗" button
 
 ---
@@ -78,8 +78,8 @@ Or just restart: `python -m uvicorn coursemap.api.server:app --reload --port 800
 
 | Gap | Severity | Fix |
 |---|---|---|
-| ~64% of L200+ courses missing prerequisite data | High | Run `python scripts/run_all_data_refresh.py` |
-| Only 39 of 50+ Massey minors present - inferred entries need scraper confirmation | Low | Run `python -m coursemap.ingestion.minor_scraper` |
+| ~34% of L200-400 (undergrad) courses missing prerequisite data; higher across all levels including postgrad, where many research papers genuinely have no prerequisite | High | Run `python scripts/run_all_data_refresh.py` |
+| Only 39 of 50+ Massey minors present, inferred entries need scraper confirmation | Low | Run `python scripts/scrape_minors.py` |
 | Elective restrictions not modelled ("choose from List A") | Medium | Requires manual verification of programme regulations |
 | Zero-credit courses (practicum/placement) visible in browser | Low | Filter excluded from auto-schedule; warning shown in detail view |
 
@@ -88,13 +88,13 @@ Or just restart: `python -m uvicorn coursemap.api.server:app --reload --port 800
 ## What's new in v7 (continuation)
 
 - **Minors expanded** from 8 to 39 using course-prefix inference. Scraped entries have real Massey data; inferred are pattern-matched. Always verify at massey.ac.nz/study/minors/
-- **`ElectiveFiller._prereqs_satisfiable`** fixed to handle OR expressions correctly - previously required ALL branches of an OR to be present (too strict), now requires ANY one branch
-- **`POST /api/plan/progress`** - mid-degree progress check: credits earned, % complete, required courses met/remaining, estimated semesters remaining, on-track warning if L300+ before 60cr
+- **`ElectiveFiller._prereqs_satisfiable`** fixed to handle OR expressions correctly. Previously required ALL branches of an OR to be present (too strict), now requires ANY one branch
+- **`POST /api/plan/progress`**: mid-degree progress check (credits earned, % complete, required courses met/remaining, estimated semesters remaining, on-track warning if L300+ before 60cr)
 - **Double-major `gap_explanation`** now correctly says "overlap" rather than repeating the single-major BInfSc message
-- **Cache version bumped** to `v7.0` - all v6 cached plans auto-invalidated
+- **Cache version bumped** to `v7.1`, all v6 cached plans auto-invalidated
 - **API version** updated to `7.0.0`
 - **`/api/minors`** now exposes `total`, `scraped`, `inferred` counts and supports `?data_quality=` filter
-- **Progress bar** in UI - when completed courses exist and `credits_prior > 0`, a green progress bar shows degree completion percentage
+- **Progress bar** in UI: when completed courses exist and `credits_prior > 0`, a green progress bar shows degree completion percentage
 - **Minor label** updated from "beta" to "39 available" in sidebar
 - Dead `_REBALANCE_THRESHOLD_POSTGRAD` constant removed from generator
 
@@ -104,7 +104,7 @@ Or just restart: `python -m uvicorn coursemap.api.server:app --reload --port 800
 python -m pytest tests/ -q
 ```
 
-**441 tests, 0 failures.**
+**677 passed, 1 skipped, 9 xfailed.** The xfailed tests are documented, known limitations (see DATA_QUALITY.md), not silent skips.
 
 ---
 
@@ -113,7 +113,7 @@ python -m pytest tests/ -q
 ```
 coursemap/
   api/
-    server.py           API routes (FastAPI) - 1,350 lines
+    server.py           API routes (FastAPI), 1,839 lines
     plan_store.py       SQLite plan cache with async wrappers
     ui.html             Single-file frontend (vanilla JS)
   domain/
@@ -129,7 +129,9 @@ coursemap/
   rules/
     degree_rules.py     Derives requirement tree from qual + major data
   services/
-    planner_service.py  Main orchestration (1,582 lines - refactor target)
+    planner_service.py  Main orchestration (1,685 lines, large, but the
+                         elective-filler duplication that was the real
+                         refactor target is fixed, see CHANGELOG v2.3.0)
     degree_info_service.py     Read-only degree metadata queries
     plan_export_service.py     Plain-text and Markdown export formatting
   validation/
@@ -139,6 +141,6 @@ coursemap/
 datasets/
   courses.json          2,766 courses with offerings, credits, prereqs
   majors.json           380 majors with requirement trees
-  minors.json           8 minors (beta)
+  minors.json           39 minors, all pattern-inferred from course prefixes
   qualifications.json   176 qualifications
 ```
