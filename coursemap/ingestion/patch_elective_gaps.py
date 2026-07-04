@@ -1,5 +1,5 @@
 """
-patch_elective_gaps.py - Post-scrape patch to fix majors with insufficient
+patch_elective_gaps.py: post-scrape patch to fix majors with insufficient
 credit coverage in their requirement trees.
 
 Every NZ bachelor degree has a free-elective component (students choose courses
@@ -40,20 +40,6 @@ def _total_req_credits(req: dict, courses: dict) -> int:
     return 0
 
 
-def _collect_codes(req: dict, result: set | None = None) -> set:
-    if result is None:
-        result = set()
-    t = req.get("type", "")
-    if t == "COURSE":
-        result.add(req.get("course_code", ""))
-    elif t == "CHOOSE_CREDITS":
-        result.update(req.get("course_codes", []))
-    elif t == "ALL_OF":
-        for ch in req.get("children", []):
-            _collect_codes(ch, result)
-    return result
-
-
 def _has_free_elective_node(req: dict) -> bool:
     """Return True if the requirement tree already has a free-elective node."""
     if req.get("type") == "CHOOSE_CREDITS" and req.get("label", "").startswith("Free elective"):
@@ -65,23 +51,20 @@ def _has_free_elective_node(req: dict) -> bool:
 
 
 def patch(courses_path: Path | None = None, majors_path: Path | None = None,
-          specs_path: Path | None = None, quals_path: Path | None = None) -> int:
+          specs_path: Path | None = None) -> int:
     """
     Patch majors.json in-place.  Returns the number of majors patched.
     """
     courses_path = courses_path or _DATASETS_DIR / "courses.json"
     majors_path  = majors_path  or _DATASETS_DIR / "majors.json"
     specs_path   = specs_path   or _DATASETS_DIR / "specialisations.json"
-    quals_path   = quals_path   or _DATASETS_DIR / "qualifications.json"
 
     courses_list = json.loads(courses_path.read_text(encoding="utf-8"))
     majors       = json.loads(majors_path.read_text(encoding="utf-8"))
     specs        = json.loads(specs_path.read_text(encoding="utf-8"))
-    quals        = json.loads(quals_path.read_text(encoding="utf-8"))
 
     courses   = {c["course_code"]: c for c in courses_list}
     spec_map  = {s["title"]: s for s in specs}
-    qual_map  = {q["qual_code"]: q for q in quals}
 
     patched = 0
     for m in majors:
@@ -89,7 +72,6 @@ def patch(courses_path: Path | None = None, majors_path: Path | None = None,
         if not spec:
             continue
 
-        level  = spec.get("level", 7)
         length = spec.get("length", 3)
         target = length * 120
 
@@ -102,7 +84,6 @@ def patch(courses_path: Path | None = None, majors_path: Path | None = None,
         if _has_free_elective_node(m["requirement"]):
             continue  # already patched
 
-        existing_codes = _collect_codes(m["requirement"])
         # NOTE: course_codes is intentionally empty here.
         # The ElectiveFiller in generate_filled_plan() handles intelligent selection
         # of same-subject electives when auto_fill=True. Populating course_codes with
@@ -112,7 +93,7 @@ def patch(courses_path: Path | None = None, majors_path: Path | None = None,
             "type": "CHOOSE_CREDITS",
             "credits": gap,
             "course_codes": [],
-            "label": f"Free electives ({gap}cr) - choose from any Massey courses",
+            "label": f"Free electives ({gap}cr), choose from any Massey courses",
         }
 
         if m["requirement"]["type"] == "ALL_OF":

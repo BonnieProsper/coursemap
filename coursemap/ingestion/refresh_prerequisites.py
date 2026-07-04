@@ -1,8 +1,10 @@
 """
-Refresh prerequisite data in datasets/courses.json using the HTML-aware scraper.
+Refresh prerequisite, restriction, and corequisite data in datasets/courses.json
+using the HTML-aware scraper.
 
-Reads the existing courses.json, fetches each course's Massey page to extract
-structured prerequisites (AND/OR logic), then writes the updated file back.
+Reads the existing courses.json, fetches each course's Massey page once to
+extract structured prerequisites (AND/OR logic) plus flat restriction and
+corequisite code lists, then writes the updated file back.
 
 No Swiftype API key required -- only direct HTTP fetches to Massey's site.
 
@@ -27,11 +29,9 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any
 
-import requests
-from bs4 import BeautifulSoup
-
-from coursemap.ingestion.prerequisite_scraper import find_prereq_text, parse_prerequisite_text
+from coursemap.ingestion.prerequisite_scraper import scrape_course_relations
 
 logger = logging.getLogger(__name__)
 
@@ -39,33 +39,17 @@ _DATASETS_DIR = Path(__file__).resolve().parents[2] / "datasets"
 _COURSES_PATH = _DATASETS_DIR / "courses.json"
 
 
-def _fetch_prerequisites(code: str, url: str, timeout: int) -> tuple[str, object]:
+def _fetch_relations(code: str, url: str, timeout: int) -> tuple[str, dict[str, Any]]:
     """
-    Fetch one course page and return (code, parsed_prerequisite_tree).
+    Fetch one course page and return (code, relations_dict), where
+    relations_dict has "prerequisites" / "restrictions" / "corequisites"
+    keys (see `scrape_course_relations`).
 
-    Returns (code, None) on any fetch or parse failure.
+    Jitter prevents all workers from hammering the server simultaneously at
+    the start of each batch, which would trigger CDN rate limits.
     """
-    # Jitter prevents all workers from hammering the server simultaneously
-    # at the start of each batch, which would trigger CDN rate limits.
     time.sleep(random.uniform(0.1, 0.5))
-    try:
-        r = requests.get(url, timeout=timeout,
-                         headers={"User-Agent": (
-                             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                             "AppleWebKit/537.36 (KHTML, like Gecko) "
-                             "Chrome/122.0.0.0 Safari/537.36"
-                         )})
-        if r.status_code != 200:
-            logger.debug("HTTP %d for %s", r.status_code, url)
-            return code, None
-        soup = BeautifulSoup(r.text, "html.parser")
-        text = find_prereq_text(soup)
-        if not text:
-            return code, None
-        return code, parse_prerequisite_text(text)
-    except Exception as exc:
-        logger.debug("Failed to scrape prerequisites for %s: %s", code, exc)
-        return code, None
+    return code, scrape_course_relations(url, timeout=timeout)
 
 
 def refresh_prerequisites(
@@ -77,7 +61,8 @@ def refresh_prerequisites(
     only_missing: bool = False,
 ) -> None:
     """
-    Re-scrape prerequisites for all courses and update courses.json.
+    Re-scrape prerequisites, restrictions, and corequisites for all courses
+    and update courses.json. One page fetch per course covers all three.
 
     Args:
         courses_path:  Path to courses.json.
@@ -86,8 +71,13 @@ def refresh_prerequisites(
         limit:         Cap on courses to process (None = all).
         dry_run:       If True, report changes without writing.
         only_missing:  If True, skip courses already using structured
-                       (dict or str) format - only re-scrape flat-list
-                       and null entries.
+                       (dict or str) prerequisite format. Only re-scrape
+                       flat-list and null prerequisite entries. This flag
+                       is keyed on prerequisites only, since an empty
+                       restriction/corequisite list is indistinguishable
+                       from "genuinely has none" once this fix has run once;
+                       there's no cheap signal to detect "still unscraped"
+                       for those two fields the way there is for prerequisites.
     """
     with open(courses_path, encoding="utf-8") as f:
         courses = json.load(f)
@@ -110,14 +100,17 @@ def refresh_prerequisites(
         to_process = to_process[:limit]
 
     total = len(to_process)
-    logger.info("Scraping prerequisites for %d courses (concurrency=%d)...", total, concurrency)
+    logger.info(
+        "Scraping prerequisites/restrictions/corequisites for %d courses (concurrency=%d)...",
+        total, concurrency,
+    )
 
     updated = 0
     done = 0
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = {
-            executor.submit(_fetch_prerequisites, code, url, timeout): code
+            executor.submit(_fetch_relations, code, url, timeout): code
             for code, url in to_process
         }
         for future in as_completed(futures):
@@ -127,24 +120,28 @@ def refresh_prerequisites(
                 logger.info("Progress: %d/%d", done, total)
 
             try:
-                result_code, prereqs = future.result()
+                result_code, relations = future.result()
             except Exception as exc:
                 logger.warning("Unexpected error for %s: %s", code, exc)
                 continue
 
             if result_code in index:
-                courses[index[result_code]]["prerequisites"] = prereqs
-                if prereqs is not None:
+                idx = index[result_code]
+                courses[idx]["prerequisites"] = relations["prerequisites"]
+                courses[idx]["restrictions"] = relations["restrictions"]
+                courses[idx]["corequisites"] = relations["corequisites"]
+                if relations["prerequisites"] is not None or relations["restrictions"] or relations["corequisites"]:
                     updated += 1
 
-    logger.info("Scraped %d courses; %d have prerequisites.", total, updated)
+    logger.info("Scraped %d courses; %d have at least one of prereq/restriction/corequisite.", total, updated)
 
-    # Safety: if we got 0 prerequisites from 100+ courses, something is broken.
+    # Safety: if we got 0 data from 100+ courses, something is broken.
     # Massey may have changed their HTML, or the requests are being blocked.
     # Refuse to overwrite the dataset to avoid wiping working data.
     if updated == 0 and total > 100:
         logger.error(
-            "ABORTED: scraped %d courses but found 0 prerequisites. "
+            "ABORTED: scraped %d courses but found 0 prerequisites, restrictions, "
+            "or corequisites across all of them. "
             "This almost certainly means Massey's page structure has changed "
             "or requests are being blocked (check for 403/captcha responses). "
             "courses.json was NOT modified. "
@@ -154,7 +151,7 @@ def refresh_prerequisites(
         return
 
     if dry_run:
-        logger.info("Dry run - courses.json not modified.")
+        logger.info("Dry run, courses.json not modified.")
         return
 
     # Atomic write
