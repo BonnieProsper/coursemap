@@ -76,7 +76,58 @@ def test_majors_search():
 def test_majors_search_no_results():
     r = client.get("/api/majors?search=xyzzzzznonexistent")
     assert r.status_code == 200
-    assert r.json()["count"] == 0
+    data = r.json()
+    assert data["count"] == 0
+    assert data["is_fuzzy_match"] is True  # fuzzy fallback was tried but found nothing
+
+
+def test_majors_search_exact_match_is_not_fuzzy():
+    """A genuine exact/substring match must not be flagged as fuzzy."""
+    r = client.get("/api/majors?search=computer science")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["count"] >= 1
+    assert data["is_fuzzy_match"] is False
+
+
+def test_majors_search_typo_falls_back_to_fuzzy_match():
+    """
+    Regression test: a typo'd search must surface useful results via fuzzy
+    matching, not an empty list. Previously this endpoint had zero typo
+    tolerance. "compter scince" returned nothing, even though the dataset
+    obviously has a "Computer Science" major and the rest of the API
+    (PlannerService._resolve_major) already uses difflib for exactly this
+    kind of fallback in its error messages.
+    """
+    r = client.get("/api/majors?search=compter scince")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["is_fuzzy_match"] is True
+    assert data["count"] > 0
+    names = [m["name"] for m in data["majors"]]
+    assert any("Computer Science" in n for n in names), (
+        f"Expected a Computer Science major in fuzzy results for 'compter "
+        f"scince', got: {names}"
+    )
+
+
+def test_majors_search_fuzzy_match_ranks_best_guess_first():
+    """
+    Regression test: fuzzy match results must be ordered by relevance (best
+    guess first), not re-sorted alphabetically. An earlier version of this
+    fix correctly found "Computer Science" as the best match for "compter
+    scince" via difflib, but then an unconditional alphabetical re-sort
+    moved "Animal Science" ahead of it purely because A < C, defeating the
+    entire point of ranking by similarity.
+    """
+    r = client.get("/api/majors?search=compter scince")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["majors"], "Expected at least one fuzzy match"
+    assert "Computer Science" in data["majors"][0]["name"], (
+        f"Expected Computer Science to rank first for 'compter scince', "
+        f"got: {data['majors'][0]['name']}"
+    )
 
 
 def test_majors_resolve_exact():
@@ -238,7 +289,7 @@ def test_plan_exclude_required_emits_warning():
             "Excluding a required course should produce a warning"
         )
     else:
-        # 422 is also valid - the plan is impossible without a required course
+        # 422 is also valid, the plan is impossible without a required course
         assert r.status_code == 422, f"Expected 200 or 422, got {r.status_code}"
 
 
@@ -275,7 +326,7 @@ def test_plan_double_major():
 
 
 def test_plan_autofill_and_double_major_supported():
-    """auto_fill + double_major is now supported - should return 200."""
+    """auto_fill + double_major is now supported. Should return 200."""
     r = client.post("/api/plan", json=_base_plan_request(
         double_major="Mathematics", auto_fill=True
     ))
@@ -448,3 +499,270 @@ def test_share_button_url_state_includes_all_params():
     assert data["meta"]["credits_transfer"] == 30
     assert not any("SS" in s["semester"] for s in data["semesters"])
     assert data["meta"]["credits_prior"] > 0
+
+
+# ── Double major + auto-fill ───────────────────────────────────────────────────
+
+def test_filled_double_major_plan_via_service():
+    from coursemap.ingestion.dataset_loader import load_courses, load_majors
+    from coursemap.services.planner_service import PlannerService
+    svc = PlannerService(load_courses(), load_majors())
+    plan, info, filler = svc.generate_filled_double_major_plan(
+        major_name="Computer Science",
+        second_major_name="Mathematics",
+    )
+    assert plan
+    assert info["first_label"]
+    assert info["second_label"]
+    assert isinstance(filler, (set, frozenset, list))
+
+
+def test_filled_double_major_via_api():
+    r = client.post("/api/plan", json={
+        "major": "Computer Science",
+        "double_major": "Mathematics",
+        "auto_fill": True,
+        "campus": "D",
+        "mode": "DIS",
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["double_major_info"] is not None
+    assert "filler_codes" in data
+
+
+# ── start_semester ──────────────────────────────────────────────────────────────
+
+def test_plan_starting_s2():
+    r = client.post("/api/plan", json={
+        "major": "Computer Science",
+        "start_year": 2026,
+        "start_semester": "S2",
+        "campus": "D",
+        "mode": "DIS",
+    })
+    assert r.status_code == 200
+    first_sem = r.json()["semesters"][0]
+    assert first_sem["semester"] == "S2"
+    assert first_sem["year"] == 2026
+
+
+def test_plan_starting_s1():
+    r = client.post("/api/plan", json={
+        "major": "Computer Science",
+        "start_year": 2027,
+        "start_semester": "S1",
+        "campus": "D",
+        "mode": "DIS",
+    })
+    assert r.status_code == 200
+    first_sem = r.json()["semesters"][0]
+    assert first_sem["semester"] == "S1"
+    assert first_sem["year"] == 2027
+
+
+# ── /api/courses/{code}/explain: offering-aware earliest semester ────────────
+
+def test_explain_s1_only_deep_chain():
+    """Explain endpoint uses offering-aware earliest semester calculation."""
+    import re
+    from coursemap.ingestion.dataset_loader import load_courses
+    courses = load_courses()
+
+    s1_only_deep = None
+    for code, c in courses.items():
+        if not c.prerequisites:
+            continue
+        s1_only = (
+            c.offerings
+            and all(o.semester == "S1" for o in c.offerings
+                    if o.campus == "D" and o.mode == "DIS")
+            and any(o.campus == "D" and o.mode == "DIS" for o in c.offerings)
+        )
+        if s1_only:
+            s1_only_deep = code
+            break
+
+    if not s1_only_deep:
+        pytest.skip("No S1-only D/DIS course with prerequisites in dataset")
+
+    r = client.get(f"/api/courses/{s1_only_deep}/explain?major=Computer+Science&campus=D&mode=DIS")
+    assert r.status_code == 200
+    data = r.json()
+    depth = data["chain_depth"]
+    text = " ".join(data["constraints"]).lower()
+    m = re.search(r"earliest possible semester: (\d+)", text)
+    if m:
+        reported = int(m.group(1))
+        assert reported >= depth + 1, (
+            f"Earliest sem {reported} should be >= chain_depth+1 = {depth+1}"
+        )
+
+
+def test_explain_no_prereq_message():
+    from coursemap.ingestion.dataset_loader import load_courses
+    courses = load_courses()
+    no_prereq = next(
+        (c for c in courses.values() if not c.prerequisites and c.level == 100),
+        None
+    )
+    if not no_prereq:
+        pytest.skip("No level-100 course without prerequisites in dataset")
+    r = client.get(f"/api/courses/{no_prereq.code}/explain?major=Computer+Science")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["chain_depth"] == 0
+    text = " ".join(data["constraints"]).lower()
+    assert "no prerequisites" in text
+    assert "year 1" in text or "semester 1" in text
+
+
+# ── Packaging ────────────────────────────────────────────────────────────────
+
+def test_package_version_matches_pyproject():
+    """Installed package version matches pyproject.toml's declared version."""
+    import importlib.metadata, tomllib, pathlib
+    pkg_version = importlib.metadata.version("coursemap")
+    toml_path = pathlib.Path(__file__).parent.parent / "pyproject.toml"
+    if toml_path.exists():
+        with open(toml_path, "rb") as f:
+            toml = tomllib.load(f)
+        toml_version = toml["project"]["version"]
+        assert pkg_version == toml_version, (
+            f"Package version {pkg_version!r} != pyproject.toml version {toml_version!r}"
+        )
+
+
+# ── free_elective_gap reporting ───────────────────────────────────────────────
+
+def test_api_gap_zero_when_autofill():
+    r = client.post("/api/plan", json={
+        "major":  "Computer Science – Bachelor of Information Sciences",
+        "campus": "D", "mode": "DIS", "start_year": 2026,
+        "no_summer": True, "auto_fill": True,
+        "completed": [], "prefer": [], "exclude": [],
+    })
+    assert r.status_code == 200
+    d = r.json()
+    credits_total = d["meta"]["credits_planned"] + d["meta"]["credits_prior"]
+    degree_target = d["meta"]["degree_target"]
+    if credits_total >= degree_target:
+        assert d["meta"]["free_elective_gap"] == 0, (
+            f"Completed plan should show gap=0, got {d['meta']['free_elective_gap']} "
+            f"(planned={credits_total}cr, target={degree_target}cr)"
+        )
+    assert d["meta"]["raw_elective_gap"] >= 0
+
+
+# ── course detail fields ───────────────────────────────────────────────────────
+
+def test_course_detail_has_offered_semesters():
+    r = client.get("/api/courses/159201")
+    assert r.status_code == 200
+    d = r.json()
+    assert "offered_semesters" in d
+    assert isinstance(d["offered_semesters"], list)
+    assert len(d["offered_semesters"]) > 0
+
+
+def test_course_detail_has_prerequisite_expression():
+    r = client.get("/api/courses/159201")
+    d = r.json()
+    assert "prerequisite_expression" in d
+    assert d["prerequisite_expression"] is not None
+    assert "type" in d["prerequisite_expression"]
+
+
+def test_course_detail_has_restrictions_field():
+    r = client.get("/api/courses/159201")
+    d = r.json()
+    assert "restrictions" in d
+    assert isinstance(d["restrictions"], list)
+
+
+# ── listing limits ──────────────────────────────────────────────────────────────
+
+def test_majors_limit_500():
+    r = client.get("/api/majors?limit=500")
+    assert r.status_code == 200
+    assert r.json()["count"] >= 100
+
+
+def test_majors_limit_501_rejected():
+    r = client.get("/api/majors?limit=501")
+    assert r.status_code == 422
+
+
+def test_courses_limit_2000():
+    r = client.get("/api/courses?limit=2000")
+    assert r.status_code == 200
+    assert r.json()["count"] >= 500
+
+
+# ── prior-completed and transfer credits ──────────────────────────────────────
+
+def test_plan_with_prior_completed():
+    r = client.post("/api/plan", json={
+        "major":  "Computer Science – Bachelor of Information Sciences",
+        "campus": "D", "mode": "DIS", "start_year": 2026,
+        "no_summer": True, "auto_fill": True,
+        "completed": ["159201", "159234", "297101"],
+        "prefer": [], "exclude": [],
+        "transfer_credits": 45,
+    })
+    assert r.status_code == 200
+    d = r.json()
+    all_codes = [c["code"] for s in d["semesters"] for c in s["courses"]]
+    assert "159201" not in all_codes
+    assert "159234" not in all_codes
+    assert "297101" not in all_codes
+    assert d["meta"]["credits_transfer"] == 45
+
+
+def test_api_double_major_plan():
+    """
+    CS + Data Science (both BInfSc) have significant required-course
+    divergence, so the combined plan genuinely needs more than the 360cr
+    qualification minimum, the same documented behaviour as
+    test_double_major_does_not_delete_required_courses_to_fit_minimum in
+    test_integration.py (a different major pair). The plan must reach
+    its own real degree_target, not be forced down to exactly 360 by
+    dropping required courses.
+    """
+    r = client.post("/api/plan", json={
+        "major":        "Computer Science – Bachelor of Information Sciences",
+        "double_major": "Data Science – Bachelor of Information Sciences",
+        "campus": "D", "mode": "DIS", "start_year": 2026,
+        "no_summer": True, "auto_fill": True,
+        "completed": [], "prefer": [], "exclude": [],
+    })
+    assert r.status_code == 200
+    d = r.json()
+    assert d["double_major_info"] is not None
+    assert "shared_codes" in d["double_major_info"]
+    assert "saved_credits" in d["double_major_info"]
+    total = sum(s["credits"] for s in d["semesters"])
+    qualification_minimum = 360
+    assert total >= qualification_minimum, (
+        f"Double major plan came back at {total}cr, below the {qualification_minimum}cr "
+        f"qualification minimum. If this is a genuine regression, check "
+        f"generate_filled_double_major_plan's degree_target calculation."
+    )
+    # This specific pairing is expected to exceed the minimum (see
+    # combined_majors_exceed_qualification_minimum in the response info,
+    # asserted separately below); a future dataset refresh could legitimately
+    # change the exact overflow amount, so only the direction is pinned here.
+    if d["double_major_info"].get("combined_majors_exceed_qualification_minimum"):
+        assert total > qualification_minimum
+
+
+def test_api_useful_error_wrong_campus_mode():
+    r = client.post("/api/plan", json={
+        "major": "Computer Science – Bachelor of Information Sciences",
+        "campus": "M", "mode": "DIS",  # M/DIS doesn't exist for CS
+        "start_year": 2026, "no_summer": True,
+        "completed": [], "prefer": [], "exclude": [],
+    })
+    assert r.status_code == 422
+    d = r.json()
+    assert "Valid combinations" in d["detail"] or "offering" in d["detail"].lower()
