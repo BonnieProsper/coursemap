@@ -286,9 +286,9 @@ def check_credits(
             )
         elif course.credits == 0:
             # Zero-credit courses (practicums, language enrolments, etc.) are
-            # intentionally non-schedulable - downgrade from error to warning.
+            # intentionally non-schedulable, downgrade from error to warning.
             warnings.append(
-                f"Course {code!r}: credits=0 (non-schedulable practicum/language course - will be skipped by planner)."
+                f"Course {code!r}: credits=0 (non-schedulable practicum/language course, will be skipped by planner)."
             )
         elif course.credits < 0:
             errors.append(
@@ -453,3 +453,42 @@ def validate_dataset(
         raise DatasetValidationError(result)
 
     return result
+
+
+def _cli() -> None:
+    """
+    Standalone CLI entry point: python -m coursemap.validation.dataset_validator [--report]
+
+    Loads the bundled datasets and prints a full validation summary.
+    Exits non-zero only when validation errors (not warnings) are found, so
+    this can be used as a CI/refresh-pipeline gate.
+
+    --report is accepted (and is the default behaviour) for backwards
+    compatibility with scripts/refresh_data.sh, which always passes it.
+    """
+    import argparse
+    import sys
+
+    from coursemap.ingestion.dataset_loader import load_courses, load_majors
+
+    parser = argparse.ArgumentParser(
+        description="Validate the bundled coursemap datasets for structural/referential integrity."
+    )
+    parser.add_argument(
+        "--report", action="store_true",
+        help="Print the full error/warning report (default behaviour either way).",
+    )
+    parser.parse_args()
+
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+
+    courses = load_courses()
+    majors = load_majors()
+    result = validate_dataset(courses, majors, raise_on_error=False)
+
+    print(result.summary())
+    sys.exit(0 if result.is_valid else 1)
+
+
+if __name__ == "__main__":
+    _cli()

@@ -1,5 +1,5 @@
 """
-DegreeInfoService - thin wrapper that extracts degree-level queries
+DegreeInfoService: thin wrapper that extracts degree-level queries
 from PlannerService into a focused, independently testable module.
 
 All methods delegate to the underlying PlannerService; this class
@@ -57,7 +57,7 @@ class DegreeInfoService:
     ) -> set[str]:
         """
         Required courses that are not offered in the requested campus/mode
-        combination - these will appear as warnings on any generated plan.
+        combination. These will appear as warnings on any generated plan.
         """
         return self._svc.campus_excluded_courses(major_name, campus=campus, mode=mode)
 

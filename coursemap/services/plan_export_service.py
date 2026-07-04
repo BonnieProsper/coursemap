@@ -1,5 +1,5 @@
 """
-PlanExportService - formats a stored plan dict into various export shapes.
+PlanExportService: formats a stored plan dict into various export shapes.
 
 Extracted from the server.py route handlers so the formatting logic is
 testable independently of the HTTP layer.
@@ -23,7 +23,7 @@ class PlanExportService:
         warnings  = cached.get("warnings", [])
 
         lines = [
-            "COURSEMAP - UNOFFICIAL DEGREE PLAN SUMMARY",
+            "COURSEMAP: UNOFFICIAL DEGREE PLAN SUMMARY",
             "=" * 52,
             f"Major:           {meta.get('major', '?')}",
             f"Campus / Mode:   {meta.get('campus', '?')} / {meta.get('mode', '?')}",
@@ -35,7 +35,7 @@ class PlanExportService:
         gap = meta.get("free_elective_gap", 0)
         if gap > 0:
             expl = meta.get("gap_explanation") or f"{gap}cr of free electives unscheduled."
-            lines.append(f"Remaining gap:   {gap}cr - {expl}")
+            lines.append(f"Remaining gap:   {gap}cr ({expl})")
 
         lines += ["", "SEMESTER SCHEDULE", "-" * 52]
 
@@ -53,7 +53,7 @@ class PlanExportService:
         lines += [
             "",
             "=" * 52,
-            "UNOFFICIAL - always verify with Massey University and your academic advisor.",
+            "UNOFFICIAL. Always verify with Massey University and your academic advisor.",
             "massey.ac.nz/study  |  coursemap (unofficial tool)",
         ]
         if plan_id:
@@ -71,7 +71,7 @@ class PlanExportService:
         warnings  = cached.get("warnings", [])
 
         lines = [
-            f"# Degree Plan - {meta.get('major', 'Unknown')}",
+            f"# Degree Plan: {meta.get('major', 'Unknown')}",
             "",
             f"| Field | Value |",
             f"|---|---|",
@@ -84,7 +84,7 @@ class PlanExportService:
 
         gap = meta.get("free_elective_gap", 0)
         if gap > 0:
-            lines.append(f"> **Free elective gap: {gap}cr** - {meta.get('gap_explanation', '')}")
+            lines.append(f"> **Free elective gap: {gap}cr** ({meta.get('gap_explanation', '')})")
             lines.append("")
 
         for sem in semesters:
@@ -103,5 +103,5 @@ class PlanExportService:
                 lines.append(f"- {w}")
             lines.append("")
 
-        lines.append("*Unofficial - always verify with Massey University and your academic advisor.*")
+        lines.append("*Unofficial. Always verify with Massey University and your academic advisor.*")
         return "\n".join(lines)

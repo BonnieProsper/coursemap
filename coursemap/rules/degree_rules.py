@@ -59,6 +59,18 @@ class DegreeProfile:
 
 # Keyed by (nzqf_level, length_years). Missing combinations fall back to
 # total_credits = length * 120 with no level constraints.
+#
+# Caveat: max_level_100/min_level_300 here are shared across every 3/4/5-year
+# bachelor's degree, but Massey's actual regulations set these per degree
+# schedule, not per (level, length). Verified against live regulations for
+# BSc, BA, BCom, and BInfoSci: all four use exactly 165/75, which is why a
+# single shared profile is a reasonable default. Bachelor of Business is a
+# known exception (cap is 180, not 165); it isn't special-cased here because
+# doing so precisely would mean keying DegreeProfile by qualification name
+# instead of (level, length), a bigger change than this dataclass currently
+# supports. A BBus plan is very unlikely to hit exactly 166-180cr at L100
+# and get incorrectly flagged, but it is possible, flag it if a student
+# reports a false failure there.
 _DEGREE_PROFILES: dict[tuple, DegreeProfile] = {
     # Standard 3-year bachelor's (BHSc, BSc, BA, BBus, etc.)
     (7, 3): DegreeProfile(
@@ -120,35 +132,21 @@ def cap_overcaptured_required_codes(
     tree_required: set[str],
 ) -> tuple[set[str], bool]:
     """
-    Decide which required-course codes to keep when a major's scraped data
-    "over-captures" more required courses than the degree's credit target
-    allows for (e.g. a 120cr diploma whose major data lists 165cr of
-    `CourseRequirement` codes - almost always because the source data
-    flattened several alternative specialisation tracks into one list,
-    rather than the degree genuinely requiring more credits than it awards).
+    Decide which required-course codes to keep when a major's data lists
+    more required courses than the degree's credit target allows for
+    (typically because several alternative specialisation tracks were
+    flattened into one list rather than the degree genuinely needing that
+    many credits).
 
-    Returns (kept_codes, was_capped). When was_capped is False, kept_codes
-    equals required_codes unchanged.
+    Returns (kept_codes, was_capped); kept_codes equals required_codes
+    unchanged when was_capped is False. Codes in `tree_required` are never
+    dropped. Only the remaining, genuinely-droppable excess is capped, by
+    the same priority order PlanSearch uses when generating a plan
+    (in-tree, schedulable, lower level, then code).
 
-    This mirrors the cap decision PlanSearch._plan_for_major makes during
-    generation (same sort priority: in-tree > not, schedulable > not, lower
-    level > higher, then code for determinism) so that a standalone caller
-    with no visibility into a specific generated plan - like the
-    /api/plan/validate endpoint, which rebuilds the requirement tree fresh
-    rather than reusing whatever trim a particular generation run applied -
-    can still present a requirement tree that's actually satisfiable, rather
-    than one that always reports "missing required course" for whichever
-    courses happen to be cut by sort order, regardless of what the student
-    actually completed.
-
-    Note: this can only mirror the GENERIC cap decision (which courses any
-    plan for this major would be expected to need), not the exact trim a
-    SPECIFIC already-generated plan happened to apply (e.g. if that plan's
-    elective pool selections differed from the generic default). For majors
-    with this over-capture pattern, validation is therefore necessarily a
-    best-effort approximation - the root issue is the source data conflating
-    several alternative requirement sets into one, which no validation-side
-    workaround can fully resolve.
+    For callers without a specific generated plan (e.g. /api/plan/validate,
+    which rebuilds the tree fresh), this is necessarily an approximation of
+    what an actual generated plan would keep.
     """
     if degree_total <= 0:
         return required_codes, False
@@ -219,10 +217,16 @@ def build_degree_tree(
     force_total_credits=True (used by generate_filled_plan after augmenting the
     requirement tree with filler courses to reach the degree total).
 
+    NOTE: this does not yet emit MaxLevelCreditsRequirement/MinLevelCreditsRequirement
+    from the profile's max_level_100/min_level_300/min_level_400, even though those
+    are computed correctly by profile_for and ElectiveFiller is already
+    distribution-aware (see PlannerService._level_distribution_state). See the
+    NOTE in the function body for the second, separate issue blocking this.
+
     Args:
         major_req:                 Already-built RequirementNode for the major.
         qual_level:                NZQF level (7 = bachelor, 8 = honours, etc.).
-        qual_length:               Duration in years.
+        qual_length:                Duration in years.
         major_name:                Human-readable name (for log messages only).
         schedulable_major_credits: Total credits of major courses that have
                                    offerings. Used to decide whether to include
@@ -242,6 +246,33 @@ def build_degree_tree(
     #
     # When neither condition holds the credit target is reported separately as a
     # "free elective gap" so the student knows they must self-select extra courses.
+    #
+    # History: profile.max_level_100 / min_level_300 / min_level_400 were
+    # wired in twice and reverted twice. Attempt 1: naive wiring, reverted
+    # immediately, ElectiveFiller/PlanSearch had no concept of level
+    # distribution at all (CS-BInfoSci: 195cr/165cr-max at L100, 60cr/75cr-min
+    # at L300). Attempt 2: made ElectiveFiller distribution-aware
+    # (PlannerService._level_distribution_state, ElectiveFiller's dedicated
+    # Tier 1 for the distribution floor, level_credit_limits for the cap).
+    # That fixed the majors attempt 1 broke, but surfaced a SEPARATE,
+    # pre-existing issue: _select_electives always fully satisfies every
+    # pool's nominal credit target regardless of the elective_budget passed
+    # in (only the zero-credit-pool top-up pass and the "over-capture" case
+    # actually look at elective_budget), so when generate_filled_plan injects
+    # a filler pool alongside a major's own already-nominal-sized pool, the
+    # two pools' targets simply add up rather than sharing a combined budget.
+    # This was already happening before either wiring attempt, just invisible,
+    # since TotalCreditsRequirement uses >=, so a few extra credits overall
+    # never failed validation. A hard per-level cap is the first constraint
+    # sensitive enough to notice it (Computer Science – Bachelor of Science
+    # with prior/transfer credits: 210cr/165cr-max at L100; Creative Writing,
+    # Bachelor of Arts: 195cr/165cr-max at L100). Fixing that needs changes to
+    # _select_electives's pool-budget accounting in search.py, a separate,
+    # larger piece of work than this method's own wiring. The ElectiveFiller
+    # distribution-awareness from attempt 2 is kept (it's correct and tested
+    # on its own, and improves filler quality even without hard enforcement
+    # here), but these two node types stay unemitted until that second issue
+    # is fixed. See DATA_QUALITY.md's "Level Distribution" section.
     data_is_complete = schedulable_major_credits >= profile.total_credits
     if data_is_complete or force_total_credits:
         _total = override_total_credits if override_total_credits is not None else profile.total_credits
@@ -259,26 +290,22 @@ def filter_requirement_tree(
 ) -> RequirementNode | None:
     """
     Return a copy of node with unschedulable courses removed and pool credit
-    targets adjusted to what the configured delivery mode can actually provide.
+    targets capped at what the configured delivery mode can actually provide.
 
-    Used to align the validation tree with the working set. Two adjustments:
+    Two adjustments:
+    1. CourseRequirement nodes with no matching offering are dropped.
+    2. ChooseCreditsRequirement pool targets are capped at the credits
+       available from schedulable pool members, so a pool that can't be
+       fully met by distance offerings (e.g. field-work-heavy courses)
+       doesn't permanently fail distance plans.
 
-    1. CourseRequirement nodes for courses with no matching offering are dropped.
-    2. ChooseCreditsRequirement pool targets are capped at the total credits
-       available from schedulable pool members. When a pool's DIS courses cannot
-       meet the original credit target (e.g. field-work-heavy ecology courses
-       that are internal-only), requiring the full amount would permanently fail
-       distance plans. The cap aligns validation with what the scheduler achieves.
+    Composite nodes with no remaining children are dropped; returns None if
+    the whole subtree becomes empty.
 
-    Composite nodes with no remaining children are dropped entirely.
-    Returns None if the entire subtree becomes empty after filtering.
-
-    `keep_open_pools`: when True, an open free-elective pool (`open_pool=True`
-    with no fixed course_codes) is preserved instead of dropped. Generation
-    callers validate an UNFILLED base plan (free electives haven't been added
-    yet) and should keep dropping it - pass False (the default). Callers that
-    validate a COMPLETE plan, where free electives should genuinely be
-    checked against what the student actually took, should pass True.
+    `keep_open_pools`: pass True only when validating a complete plan, where
+    the open free-elective pool can genuinely be checked against what was
+    taken. Generation-time callers (validating an unfilled base plan) should
+    leave this False.
     """
     if isinstance(node, CourseRequirement):
         return node if node.course_code in schedulable_codes else None
