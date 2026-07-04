@@ -31,6 +31,7 @@ dev = [
     "pytest-cov",
     "httpx>=0.27",   # needed by FastAPI TestClient
     "anyio[trio]>=4.0",  # needed by async test support
+    "ruff>=0.8",     # lint + cross-version syntax check (see tests/test_integration.py::test_html_export_parses_on_minimum_supported_python)
 ]
 # Install everything
 all = [
@@ -42,6 +43,9 @@ all = [
     "slowapi>=0.1.9",
     "httpx>=0.27",
     "anyio[trio]>=4.0",
+    "pytest>=7",
+    "pytest-cov",
+    "ruff>=0.8",
 ]
 
 [project.scripts]
