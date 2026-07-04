@@ -16,16 +16,17 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+from coursemap.domain.course import sort_semesters
 from coursemap.domain.prerequisite import prereq_to_dict, prereq_to_human
 from coursemap.domain.requirement_nodes import (
     AllOfRequirement, AnyOfRequirement, ChooseCreditsRequirement,
     ChooseNRequirement, CourseRequirement, MajorRequirement,
-    MaxLevelCreditsRequirement, MinLevelCreditsFromRequirement,
+    MaxLevelCreditsRequirement,
     MinLevelCreditsRequirement, TotalCreditsRequirement,
 )
 from coursemap.ingestion.dataset_loader import load_courses, load_majors
@@ -34,8 +35,8 @@ from coursemap.ingestion.freshness import freshness_report
 from coursemap.services.planner_service import PlannerService
 from coursemap.validation.dataset_validator import validate_dataset
 from coursemap.export.ical import plan_to_ical
-from coursemap.domain.fees import estimate_plan_fees, fee_per_credit, estimate_course_fee
-from coursemap.api.plan_store import plan_store, async_get as _astore_get, async_put as _astore_put
+from coursemap.domain.fees import fee_per_credit
+from coursemap.api.plan_store import plan_store
 from coursemap.services.plan_export_service import PlanExportService as _PlanExportSvc
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# Shared singletons - loaded once on first request
+# Shared singletons, loaded once on first request
 # ---------------------------------------------------------------------------
 
 @lru_cache(maxsize=1)
@@ -156,9 +157,26 @@ def _minors() -> list:
 # Request / response schemas
 # ---------------------------------------------------------------------------
 
+def _validate_major_not_blank(v: str | None) -> str | None:
+    """Shared validator: a major name field must not be empty or whitespace-only.
+
+    An empty/blank major name would otherwise fall through to
+    PlannerService._resolve_major's "no filter = all majors" behavior. A
+    legitimate feature for generate_best_plan's major-exploration mode, but
+    not something any of these request-scoped endpoints should trigger
+    silently. Used by PlanRequest, ProgressRequest, and ValidateRequest.
+    """
+    if v is not None and not v.strip():
+        raise ValueError(
+            "Major name cannot be empty or whitespace-only. "
+            "Use GET /api/majors to browse available majors."
+        )
+    return v
+
+
 class PlanRequest(BaseModel):
-    major: str = Field(..., description="Major name (partial match accepted).")
-    double_major: str | None = Field(None, description="Second major for a combined plan.")
+    major: str = Field(..., min_length=1, max_length=200, description="Major name (partial match accepted).")
+    double_major: str | None = Field(None, max_length=200, description="Second major for a combined plan.")
     start_year: int = Field(default_factory=lambda: _date.today().year, description="First calendar year of study.")
     start_semester: str = Field("S1", description="Starting semester: S1, S2, or SS.")
     max_credits: int = Field(60, ge=15, le=120, description="Credit cap per semester.")
@@ -166,6 +184,11 @@ class PlanRequest(BaseModel):
     campus: str = Field("D", description="Campus code: D, M, A, W.")
     mode: str = Field("DIS", description="Delivery mode: DIS, INT, BLK.")
     completed: list[str] = Field(default_factory=list, description="Already-completed course codes.")
+
+    @field_validator("major", "double_major")
+    @classmethod
+    def _major_not_blank(cls, v: str | None) -> str | None:
+        return _validate_major_not_blank(v)
     transfer_credits: int = Field(0, ge=0, le=360, description="Prior-learning credit recognition (0–360cr).")
     prefer: list[str] = Field(default_factory=list, description="Elective codes to prioritise.")
     exclude: list[str] = Field(default_factory=list, description="Course codes to never schedule.")
@@ -194,9 +217,14 @@ class PlanOut(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _sort_semesters(semesters) -> list[str]:
+    """Thin wrapper around coursemap.domain.course.sort_semesters for existing call sites in this module."""
+    return sort_semesters(semesters)
+
+
 def _course_to_dict(course) -> dict:
     # Distinct semesters this course runs in (any campus/mode)
-    offered_sems = sorted(set(o.semester for o in course.offerings))
+    offered_sems = _sort_semesters(o.semester for o in course.offerings)
     return {
         "code":         course.code,
         "title":        course.title,
@@ -265,7 +293,7 @@ def _build_gap_meta(
             if "information sciences" in name_lc:
                 gap_explanation = (
                     f"{residual_gap}cr of free electives are required. "
-                    "BInfSc typically expects a second major to fill this gap - "
+                    "BInfSc typically expects a second major to fill this gap, "
                     "add one below, or enable Auto-fill to select courses automatically."
                 )
             elif "bachelor of science" in name_lc or "bachelor of arts" in name_lc:
@@ -348,7 +376,7 @@ def _build_plan_warnings(
                 "Major requirements will NOT be satisfied."
             )
 
-    # Full Year courses - must enrol for all of S1+S2, not just one semester.
+    # Full Year courses must enrol for all of S1+S2, not just one semester.
     full_year_codes = [
         c.code for s in plan.semesters for c in s.courses
         if any(getattr(o, "full_year", False) for o in c.offerings)
@@ -444,7 +472,7 @@ def _plan_to_out(
 
 def _execute_plan(req: PlanRequest, svc: PlannerService):
     """
-    Single authoritative plan generation dispatch - used by both /api/plan
+    Single authoritative plan generation dispatch, used by both /api/plan
     and /api/plan/ical so flags only need updating in one place.
     Returns (plan, filler_codes, double_info).
     """
@@ -501,6 +529,15 @@ class CompareRequest(BaseModel):
     max_credits: int = Field(60, ge=15, le=120)
     no_summer: bool = Field(True)
     completed: list[str] = Field(default_factory=list)
+
+    @field_validator("majors")
+    @classmethod
+    def _majors_not_blank(cls, v: list[str]) -> list[str]:
+        for name in v:
+            _validate_major_not_blank(name)
+            if len(name) > 200:
+                raise ValueError(f"Major name too long ({len(name)} chars, max 200).")
+        return v
 
 
 @app.post("/api/plan/compare", summary="Compare plans for 2–4 majors side by side")
@@ -599,28 +636,14 @@ def data_quality_report():
     Useful for surfacing data gaps in the UI and for CI health checks.
     """
     import json as _json
-    from collections import Counter as _Counter
     from coursemap.ingestion.dataset_loader import DATASET_PATH
+    from coursemap.ingestion.prereq_coverage import prereq_coverage_summary
 
-    # Raw format distribution
     with open(DATASET_PATH, encoding="utf-8") as f:
         raw_courses = _json.load(f)
 
-    fmt: dict[str, int] = _Counter()
-    for c in raw_courses:
-        pval = c.get("prerequisites")
-        if pval is None:
-            fmt["null"] += 1
-        elif isinstance(pval, list):
-            fmt["flat_list"] += 1
-        elif isinstance(pval, dict):
-            fmt["and_or_tree"] += 1
-        elif isinstance(pval, str):
-            fmt["single_code"] += 1
-
-    total   = len(raw_courses)
-    new_fmt = fmt.get("and_or_tree", 0) + fmt.get("single_code", 0)
-    old_fmt = fmt.get("flat_list", 0)
+    coverage = prereq_coverage_summary(raw_courses)
+    total = coverage["total_courses"]
 
     courses = _svc().courses
     with_prereqs = sum(1 for c in courses.values() if c.prerequisites is not None)
@@ -629,16 +652,17 @@ def data_quality_report():
 
     return {
         "total_courses":          total,
-        "prerequisite_formats":   dict(fmt),
-        "structured_pct":         round(100 * new_fmt / total) if total else 0,
+        "prerequisite_formats":   {
+            "and_or_structured": coverage["and_or_structured"],
+            "flat_list":         coverage["flat_list"],
+            "null":              coverage["null"],
+        },
+        "structured_pct":         coverage["coverage_pct"],
         "courses_with_prereqs_after_filter": with_prereqs,
         "courses_null_after_filter":         total - with_prereqs,
-        "needs_rescrape":         old_fmt + fmt.get("null", 0),
+        "needs_rescrape":         coverage["to_rescrape"],
         "freshness":              freshness,
-        "recommendation":         (
-            "Run `python -m coursemap.ingestion.refresh_prerequisites` to upgrade "
-            f"{old_fmt + fmt.get('null', 0)} courses to structured AND/OR prerequisites."
-        ) if (old_fmt + fmt.get("null", 0)) > 0 else "All courses use structured prerequisite format.",
+        "recommendation":         coverage["recommendation"],
     }
 
 
@@ -671,15 +695,70 @@ def list_majors(
 ):
     svc = _svc()
     majors = svc.majors
+    is_fuzzy_match = False
 
     if search:
         words = search.strip().lower().split()
         def word_match(name: str) -> bool:
             tokens = name.lower().replace("–", " ").split()
             return all(any(w in tok for tok in tokens) for w in words)
-        majors = [m for m in majors if word_match(m["name"])]
+        matched = [m for m in majors if word_match(m["name"])]
 
-    majors_all = sorted(majors, key=lambda m: m["name"])
+        if not matched:
+            is_fuzzy_match = True
+            # No exact/substring match. Fall back to fuzzy matching so a
+            # typo'd search (e.g. "compter scince") still surfaces something
+            # useful instead of an empty result with no guidance. This
+            # mirrors the difflib fallback already used to generate "Did you
+            # mean" hints in PlannerService._resolve_major's error path, but
+            # applied proactively here as actual results rather than only
+            # as error-message text after a hard failure.
+            #
+            # Match against just the major-name portion (before the " –
+            # qualification" suffix), not the full string. difflib's
+            # SequenceMatcher scores over the whole string, so two unrelated
+            # majors sharing a long qualification suffix (e.g. "Master of
+            # Science") would score similarly regardless of how well the
+            # actual major name matches, often outranking the genuinely
+            # intended match (e.g. "Chemistry – Master of Science" outranked
+            # "Computer Science – Bachelor of Science" for the typo "compter
+            # scince", purely because more of the qualification tail matched).
+            import difflib as _difflib
+
+            def _name_only(full_name: str) -> str:
+                return re.split(r"\s+[\u2013\u2014-]\s+", full_name, maxsplit=1)[0]
+
+            name_only_groups: dict[str, list[dict]] = {}
+            for m in majors:
+                name_only_groups.setdefault(_name_only(m["name"]), []).append(m)
+
+            close = _difflib.get_close_matches(search, list(name_only_groups.keys()), n=10, cutoff=0.45)
+            if close:
+                matched = [m for n in close for m in name_only_groups[n]]
+            else:
+                # Last resort: any word from the query appearing anywhere in
+                # a major name, scored by overlap count. Looser than the
+                # word_match above (substring within any word, not "all
+                # query words must each match some token").
+                query_words = set(words)
+                scored = [
+                    (sum(1 for w in query_words if w in m["name"].lower()), m)
+                    for m in majors
+                ]
+                matched = [m for sc, m in sorted(scored, key=lambda x: -x[0]) if sc > 0][:10]
+
+        majors = matched
+
+    if is_fuzzy_match:
+        # Preserve relevance ranking from the fuzzy match (best guess first)
+        # An alphabetical sort here would undo exactly the ordering that
+        # makes the fuzzy fallback useful (e.g. "Animal Science" sorting
+        # ahead of "Computer Science" purely because A < C, even though
+        # difflib correctly ranked Computer Science as the far better match
+        # for a typo'd "compter scince").
+        majors_all = majors
+    else:
+        majors_all = sorted(majors, key=lambda m: m["name"])
     total_count = len(majors_all)
     majors = majors_all[:limit]
 
@@ -714,6 +793,7 @@ def list_majors(
     return {
         "total":  total_count,
         "count":  len(majors),
+        "is_fuzzy_match": is_fuzzy_match,
         "majors": [_enrich(m) for m in majors],
     }
 
@@ -978,23 +1058,23 @@ def explain_course(
     constraints: list[str] = []
 
     if not course.offerings:
-        constraints.append("This course has no recorded offerings - it may be discontinued or offered by arrangement only.")
+        constraints.append("This course has no recorded offerings. It may be discontinued or offered by arrangement only.")
     elif not matching_offerings:
         avail = sorted({f"{o['campus']}/{o['mode']}" for o in all_offerings})
         constraints.append(
             f"Not offered at {campus}/{mode}. Available at: {', '.join(avail)}."
         )
     else:
-        sems = sorted({o["semester"] for o in matching_offerings})
+        sems = _sort_semesters(o["semester"] for o in matching_offerings)
         constraints.append(f"Offered at {campus}/{mode} in: {', '.join(sems)}.")
 
     if chain_depth == 0:
         if matching_offerings:
-            sems_avail = sorted({o["semester"] for o in matching_offerings})
-            first_sem = sems_avail[0]  # S1 < S2 < SS alphabetically by convention
-            constraints.append(f"No prerequisites - can be taken in {first_sem} of year 1.")
+            sems_avail = _sort_semesters(o["semester"] for o in matching_offerings)
+            first_sem = sems_avail[0]
+            constraints.append(f"No prerequisites, can be taken in {first_sem} of year 1.")
         else:
-            constraints.append("No prerequisites - can be taken in semester 1 (subject to offering availability).")
+            constraints.append("No prerequisites, can be taken in semester 1 (subject to offering availability).")
     else:
         # Compute a more accurate earliest-semester estimate that accounts for
         # offering constraints. Each semester slot is S1→S2→SS repeating.
@@ -1002,8 +1082,6 @@ def explain_course(
         # If the course is only offered in one semester type, it may need to wait
         # an extra slot after prerequisites are met.
         sem_cycle = ["S1", "S2", "SS"]
-        # Simulate: after chain_depth slots of prerequisites, what slot can this course land in?
-        prereq_finish_slot = chain_depth - 1   # 0-indexed slot where last prereq finishes
         earliest_take_slot = chain_depth        # earliest slot to take this course (0-indexed)
         if matching_offerings:
             offered_sems = {o["semester"] for o in matching_offerings}
@@ -1016,7 +1094,7 @@ def explain_course(
         # Convert 0-indexed slot to human semester number (slot 0 = "semester 1")
         earliest_sem_number = earliest_take_slot + 1
         constraints.append(
-            f"Prerequisite chain is {chain_depth} semester{'s' if chain_depth != 1 else ''} deep - "
+            f"Prerequisite chain is {chain_depth} semester{'s' if chain_depth != 1 else ''} deep, "
             f"earliest possible semester: {earliest_sem_number}."
         )
 
@@ -1052,13 +1130,13 @@ def generate_plan(request: Request, req: PlanRequest):
                 f"Unknown course code(s) in '{label}': {', '.join(unknown)}. These will be ignored."
             )
 
-    # Compute cache key - deterministic share ID
+    # Compute cache key, deterministic share ID
     plan_key = _plan_cache_key(req)
 
     # Return cached plan if available (makes shared links deterministic).
     # _CACHE_VERSION is baked into plan_key, so a stale cached entry from
     # before a logic change simply misses here and falls through to a fresh
-    # generation below - no patch-on-read needed.
+    # generation below, no patch-on-read needed.
     cached = plan_store.get(plan_key)
     if cached is not None:
         return PlanOut(**cached)
@@ -1085,7 +1163,7 @@ def get_plan(plan_id: str):
     """
     Retrieve a cached plan by its plan_id.
     plan_id values are returned in POST /api/plan responses and encoded in share links.
-    Plans are held in memory - they survive server restarts only if the same parameters
+    Plans are held in memory. They survive server restarts only if the same parameters
     are re-submitted (which will regenerate and re-cache the same plan).
     """
     cached = plan_store.get(plan_id)
@@ -1118,7 +1196,7 @@ def generate_plan_stream(request: Request, req: PlanRequest):
       {"type": "done",     "plan_id": "…",  "plan": { full PlanOut dict }}
       {"type": "error",    "detail": "…"}
 
-    The 'done' event contains the complete plan - clients should use that
+    The 'done' event contains the complete plan. Clients should use that
     rather than making a second request.
     """
     import json as _json
@@ -1140,7 +1218,7 @@ def generate_plan_stream(request: Request, req: PlanRequest):
         return f"data: {_json.dumps(data)}\n\n"
 
     def _stream():
-        # Step 1 - check cache
+        # Step 1: check cache
         cached = plan_store.get(plan_key)
         if cached is not None:
             yield _event({"type": "progress", "step": "cached", "pct": 95, "msg": "Loading saved plan…"})
@@ -1152,11 +1230,11 @@ def generate_plan_stream(request: Request, req: PlanRequest):
         try:
             yield _event({"type": "progress", "step": "generating", "pct": 35, "msg": "Building requirement tree…"})
 
-            # Double major takes longer - hint to the UI
+            # Double major takes longer, hint to the UI
             if req.double_major:
                 yield _event({"type": "progress", "step": "generating", "pct": 50, "msg": "Scheduling double major…"})
 
-            import threading, queue as _queue
+            import queue as _queue
             _result_q: _queue.Queue = _queue.Queue()
 
             def _run_plan():
@@ -1224,14 +1302,13 @@ def generate_plan_ical(request: Request, req: PlanRequest):
     svc = _svc()
 
     # Use the plan cache so the iCal always matches what /api/plan would return
-    # for the same request - important for shared plan links.
+    # for the same request. Important for shared plan links.
     plan_key = _plan_cache_key(req)
     cached = plan_store.get(plan_key)
 
     if cached is not None:
         # Reconstruct DegreePlan from cached JSON for the iCal exporter
         from coursemap.domain.plan import DegreePlan, SemesterPlan
-        from coursemap.domain.course import Course, Offering
         cached_data = cached if isinstance(cached, dict) else json.loads(cached)
         try:
             sems = []
@@ -1279,17 +1356,35 @@ def generate_plan_ical(request: Request, req: PlanRequest):
 
 
 
+class FeesRequest(BaseModel):
+    plan_id: str | None = Field(None, description="plan_id from a previous POST /api/plan response. Takes precedence over semesters.")
+    semesters: list[dict] = Field(default_factory=list, description="Semesters array, as returned by POST /api/plan. Used when plan_id is absent.")
+    student_type: str = Field("domestic", description="domestic or international")
+
+
 @app.post("/api/plan/fees", summary="Estimate fees for a plan")
-def estimate_fees_for_plan(body: dict, student_type: str = Query("domestic", description="domestic or international")):
+def estimate_fees_for_plan(req: FeesRequest):
     """
-    Estimate total fees for a plan given a list of semesters.
-    Pass the `semesters` array from a /api/plan response.
+    Estimate total fees for a plan, given either a `plan_id` (from a
+    previous POST /api/plan response, the usual case) or an inline
+    `semesters` array.
     """
     from coursemap.domain.fees import estimate_plan_fees
-    semesters = body.get("semesters", [])
+
+    if req.plan_id:
+        cached = plan_store.get(req.plan_id)
+        if not cached:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Plan '{req.plan_id}' not found. Re-generate the plan first.",
+            )
+        semesters = cached.get("semesters", [])
+    else:
+        semesters = req.semesters
+
     if not semesters:
-        raise HTTPException(status_code=422, detail="No semesters provided.")
-    return estimate_plan_fees(semesters, student_type=student_type)
+        raise HTTPException(status_code=422, detail="No semesters provided. Pass either plan_id or semesters.")
+    return estimate_plan_fees(semesters, student_type=req.student_type)
 
 
 @app.get("/api/fees/rate", summary="Fee per credit for a subject area")
@@ -1307,16 +1402,37 @@ def get_fee_rate(
     }
 
 
+@app.get("/api/fees/constants", summary="Raw fee-rate table (single source of truth for client-side estimates)")
+def get_fee_constants():
+    """
+    Return the full fee-rate constant table used by fee_per_credit().
+
+    The web UI fetches this once at page load and uses it for its own
+    synchronous per-render fee estimates, instead of keeping a second,
+    independently-maintained copy of the table that can silently drift out
+    of sync with the backend (see fee_constants() docstring for why this
+    matters, it already happened once).
+    """
+    from coursemap.domain.fees import fee_constants
+    return fee_constants()
+
+
 
 # ---------------------------------------------------------------------------
 # Mid-degree progress check
 # ---------------------------------------------------------------------------
 
 class ProgressRequest(BaseModel):
-    major:     str
+    major:     str = Field(..., min_length=1, max_length=200)
     completed: list[str] = Field(default_factory=list, description="Completed course codes.")
     campus:    str = Field("D")
     mode:      str = Field("DIS")
+    transfer_credits: int = Field(0, ge=0, description="Credits transferred from another institution, not represented by a specific course code.")
+
+    @field_validator("major")
+    @classmethod
+    def _major_not_blank(cls, v: str) -> str:
+        return _validate_major_not_blank(v)
 
 
 @app.post("/api/plan/progress", summary="Check mid-degree progress toward requirements")
@@ -1339,11 +1455,18 @@ def check_progress(request: Request, req: ProgressRequest):
     courses_map = _courses()
     completed_set = frozenset(c.strip().upper() for c in req.completed if c.strip())
 
-    # Credits earned
-    credits_earned = sum(
+    # Credits earned: course-based credits plus any transfer credits, which
+    # aren't represented by a specific course code (e.g. credit recognised
+    # from another institution). Kept separately as course_credits_earned
+    # too, since the level-progression "on_track" check below is specifically
+    # about jumping to advanced MASSEY courses without Massey-side
+    # foundational ones. Transfer credits don't bear on that check, even
+    # though they correctly count toward overall degree progress.
+    course_credits_earned = sum(
         courses_map[c].credits for c in completed_set
         if c in courses_map and courses_map[c].credits > 0
     )
+    credits_earned = course_credits_earned + req.transfer_credits
 
     # Degree target and required codes
     try:
@@ -1356,15 +1479,41 @@ def check_progress(request: Request, req: ProgressRequest):
     required_remaining = sorted(required_codes - completed_set)
     pct_complete       = round(100 * credits_earned / degree_target) if degree_target else 0
 
-    # Free elective gap after completed credits
-    raw_gap    = svc.free_elective_gap(req.major, campus=req.campus, mode=req.mode)
+    # Free elective gap after completed credits.
+    #
+    # raw_gap is the STRUCTURAL gap for the major as a whole (e.g. 150cr for
+    # CS), entirely independent of what any specific student has completed.
+    # Only credits from courses that are genuinely free electives (not
+    # claimed by a required-course node or a named elective pool elsewhere in
+    # the degree tree) should reduce it. Subtracting the student's TOTAL
+    # completed credits here would be wrong: a student who has only
+    # completed required courses (e.g. four L100 compulsory papers) hasn't
+    # made any progress on their free-elective requirement at all, but the
+    # naive calculation would still shrink gap_remaining by their full
+    # credit total, understating how much they actually still need to plan
+    # for outside the major.
+    raw_gap = svc.free_elective_gap(req.major, campus=req.campus, mode=req.mode)
+    try:
+        from coursemap.validation.engine import _collect_claimed_codes
+        degree_tree_for_gap = svc.degree_tree_for_major(req.major, campus=req.campus, mode=req.mode)
+        claimed_codes = _collect_claimed_codes(degree_tree_for_gap)
+    except (ValueError, AttributeError):
+        claimed_codes = set()
+    free_elective_credits_completed = sum(
+        courses_map[c].credits for c in completed_set
+        if c in courses_map and courses_map[c].credits > 0 and c not in claimed_codes
+    )
     remaining_credits = max(0, degree_target - credits_earned)
 
-    # Level progression check: warn if student has completed < 60cr but has L300+ courses
+    # Level progression check: warn if student has completed < 60cr of
+    # MASSEY courses but has L300+ courses. Uses course_credits_earned
+    # (not the combined credits_earned, which includes transfer_credits),
+    # transfer credit from another institution doesn't indicate whether the
+    # student has taken Massey's own foundational courses first.
     completed_levels = [courses_map[c].level for c in req.completed if c in courses_map]
     advanced_without_base = (
         any(lvl >= 300 for lvl in completed_levels)
-        and credits_earned < 60
+        and course_credits_earned < 60
     )
 
     # Estimated semesters remaining.
@@ -1383,11 +1532,11 @@ def check_progress(request: Request, req: ProgressRequest):
         "required_total": len(required_codes),
         "required_done_count": len(required_met),
         "credits_remaining": remaining_credits,
-        "gap_remaining": max(0, raw_gap - credits_earned),
+        "gap_remaining": max(0, raw_gap - free_elective_credits_completed),
         "estimated_semesters_remaining": sems_remaining,
         "on_track": not advanced_without_base,
         "warnings": (
-            ["⚠ L300+ courses completed before 60cr base - check programme regulations."]
+            ["⚠ L300+ courses completed before 60cr base. Check programme regulations."]
             if advanced_without_base else []
         ),
     }
@@ -1403,7 +1552,7 @@ def reload_datasets():
     _courses.cache_clear()
     _minors.cache_clear()
     _specs_cache_store.clear()
-    # plan_store cache is version-keyed - old plans auto-invalidated on next fetch
+    # plan_store cache is version-keyed. Old plans auto-invalidated on next fetch
     svc = _svc()  # pre-warm
     return {
         "status": "reloaded",
@@ -1426,12 +1575,17 @@ def validate():
 
 
 class ValidateRequest(BaseModel):
-    major: str = Field(..., description="Major name to validate against.")
-    double_major: str | None = Field(None, description="Second major, for validating a double-major plan against both requirement trees.")
+    major: str = Field(..., min_length=1, max_length=200, description="Major name to validate against.")
+    double_major: str | None = Field(None, max_length=200, description="Second major, for validating a double-major plan against both requirement trees.")
     plan_id: str | None = Field(None, description="plan_id from a previously generated plan. Takes precedence over course_codes.")
     course_codes: list[str] = Field(default_factory=list, description="Ordered list of course codes in the plan (semester order). Used when plan_id is absent.")
     completed: list[str] = Field(default_factory=list, description="Already-completed course codes.")
     transfer_credits: int = Field(0, ge=0)
+
+    @field_validator("major", "double_major")
+    @classmethod
+    def _major_not_blank(cls, v: str | None) -> str | None:
+        return _validate_major_not_blank(v)
 
 
 def _validation_node_to_check(node, courses: dict, all_codes: set[str], grand_total: int, claimed: set[str]) -> dict:
@@ -1439,7 +1593,7 @@ def _validation_node_to_check(node, courses: dict, all_codes: set[str], grand_to
     Recursively convert a requirement node to a UI-renderable checklist item.
 
     `claimed` is the set of course codes already named by some specific
-    requirement elsewhere in the full tree being checked - used so an open
+    requirement elsewhere in the full tree being checked. Used so an open
     free-elective pool doesn't double-count a course that's already
     satisfying a more specific requirement.
     """
@@ -1452,7 +1606,7 @@ def _validation_node_to_check(node, courses: dict, all_codes: set[str], grand_to
             "title": c.title if c else node.course_code,
             "credits": c.credits if c else 0,
             "passed": passed,
-            "label": f"{node.course_code} - {c.title if c else '?'}",
+            "label": f"{node.course_code}: {c.title if c else '?'}",
         }
 
     if isinstance(node, TotalCreditsRequirement):
@@ -1556,13 +1710,13 @@ def validate_plan(req: ValidateRequest):
     Validate a plan against the full degree requirement tree.
 
     Accepts either:
-      - a ``plan_id`` (from a previous POST /api/plan response) - loads the
+      - a ``plan_id`` (from a previous POST /api/plan response): loads the
         cached plan and validates it without regenerating.
-      - a list of ``course_codes`` - validates those codes directly against
+      - a list of ``course_codes``: validates those codes directly against
         the degree tree.
 
     When ``double_major`` is set, validates the plan against BOTH majors'
-    requirement trees independently and reports both checklists - a plan
+    requirement trees independently and reports both checklists. A plan
     only passes overall when it satisfies each major in full. This matters
     because a double-major plan can pass one major's requirements while
     still being short on the other's (e.g. enough credits overall, but not
@@ -1600,7 +1754,7 @@ def validate_plan(req: ValidateRequest):
     all_codes_ordered = list(plan_codes) + list(prior_codes)
     credits_by_code = {c: courses[c].credits for c in all_codes if c in courses}
 
-    # Compute credit totals (shared across both majors when double_major is set -
+    # Compute credit totals (shared across both majors when double_major is set,
     # a double major is one enrolment with one set of courses, not two separate totals)
     total_credits = sum(courses[c].credits for c in plan_codes if c in courses)
     prior_credits = sum(courses[c].credits for c in prior_codes if c in courses)
@@ -1661,7 +1815,7 @@ def advisor_summary(plan_id: str):
 @app.get("/api/plan/{plan_id}/markdown",
          summary="Markdown export of a stored plan")
 def plan_markdown(plan_id: str):
-    """Return a Markdown-formatted plan - useful for pasting into Notion, Obsidian, etc."""
+    """Return a Markdown-formatted plan, useful for pasting into Notion, Obsidian, etc."""
     cached = plan_store.get(plan_id)
     if not cached:
         raise HTTPException(status_code=404, detail="Plan not found.")

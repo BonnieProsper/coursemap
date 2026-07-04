@@ -16,6 +16,7 @@ Public API:
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -37,6 +38,35 @@ class _PlanStore:
         self._lock = threading.Lock()
         self._init_db()
 
+    @contextlib.contextmanager
+    def _connection(self):
+        """
+        Open a connection, yield it inside its own transaction context, then
+        always close it.
+
+        `with sqlite3.connect(...) as conn:` alone is a common trap: a
+        Connection's own `__exit__` only commits or rolls back the current
+        transaction, it does NOT close the connection (unlike almost every
+        other Python resource's context manager). Using that pattern
+        directly, as every method here used to, leaks one open connection
+        per call for the lifetime of the process. On Linux this is mostly
+        invisible (an unlinked-but-open file still gets deleted, the inode
+        just isn't freed until the last handle closes), which is exactly why
+        it went unnoticed. On Windows, an open handle blocks the file from
+        being deleted or renamed at all, so this surfaced as
+        `PermissionError: The process cannot access the file` when tests
+        tried to clean up their temp directories afterward, i.e. a real bug,
+        not a test-only artifact. This wraps the same "with conn:" pattern
+        so the transaction handling is unchanged, but guarantees `conn.close()`
+        runs afterward regardless of how the block exits.
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._path), check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")   # concurrent reads while writing
@@ -45,7 +75,7 @@ class _PlanStore:
 
     def _init_db(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS plans (
                     plan_id    TEXT PRIMARY KEY,
@@ -69,14 +99,14 @@ class _PlanStore:
 
     def get(self, plan_id: str) -> dict | None:
         """Return the stored plan dict, or None if not found."""
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             row = conn.execute(
                 "SELECT result_json FROM plans WHERE plan_id = ?",
                 (plan_id,),
             ).fetchone()
             if row is None:
                 return None
-            # Update hit stats (best-effort - don't fail a read over this)
+            # Update hit stats (best-effort, don't fail a read over this)
             try:
                 conn.execute(
                     "UPDATE plans SET hit_count = hit_count + 1, last_hit = datetime('now') WHERE plan_id = ?",
@@ -89,7 +119,7 @@ class _PlanStore:
 
     def put(self, plan_id: str, params: dict, result: dict) -> None:
         """Insert or replace a plan. Prunes oldest plans if over the cap."""
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO plans (plan_id, params_json, result_json, created_at, hit_count)
@@ -111,12 +141,12 @@ class _PlanStore:
                 logger.debug("Pruned %d old plans from store", excess)
 
     def count(self) -> int:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             return conn.execute("SELECT COUNT(*) FROM plans").fetchone()[0]
 
     def stats(self) -> dict:
         """Return store statistics for the /api endpoint."""
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             total = conn.execute("SELECT COUNT(*) FROM plans").fetchone()[0]
             oldest = conn.execute(
                 "SELECT created_at FROM plans ORDER BY created_at ASC LIMIT 1"
@@ -136,12 +166,12 @@ class _PlanStore:
         }
 
 
-# Module-level singleton - created once on import
+# Module-level singleton, created once on import
 plan_store = _PlanStore()
 
 
 # ---------------------------------------------------------------------------
-# Async wrappers - use in async FastAPI handlers to avoid blocking the event loop
+# Async wrappers. Use in async FastAPI handlers to avoid blocking the event loop
 # ---------------------------------------------------------------------------
 
 import asyncio as _asyncio

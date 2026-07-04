@@ -23,11 +23,10 @@ import logging
 import os
 import re
 import sys
-import tempfile
 from collections import Counter
 from pathlib import Path
 
-from coursemap.domain.course import Course
+from coursemap.domain.course import Course, sort_semesters
 from coursemap.domain.plan import DegreePlan
 from coursemap.validation.dataset_validator import validate_dataset
 from coursemap.ingestion.dataset_loader import load_courses, load_majors
@@ -141,18 +140,18 @@ def _cmd_courses(args: argparse.Namespace) -> None:
         if not c.offerings:
             return "[no offerings]"
         if campus and mode:
-            sems = sorted({o.semester for o in c.offerings
-                           if o.campus == campus and o.mode == mode})
+            sems = sort_semesters(o.semester for o in c.offerings
+                           if o.campus == campus and o.mode == mode)
             return f"[{', '.join(sems)}]" if sems else "[not available]"
-        dis  = sorted({o.semester for o in c.offerings if o.mode == "DIS"})
-        int_ = sorted({o.semester for o in c.offerings if o.mode == "INT"})
+        dis  = sort_semesters(o.semester for o in c.offerings if o.mode == "DIS")
+        int_ = sort_semesters(o.semester for o in c.offerings if o.mode == "INT")
         parts = []
         if dis:
             parts.append("DIS:" + "/".join(dis))
         if int_:
             parts.append("INT:" + "/".join(int_))
-        other = sorted({o.semester for o in c.offerings
-                        if o.mode not in ("DIS", "INT")})
+        other = sort_semesters(o.semester for o in c.offerings
+                        if o.mode not in ("DIS", "INT"))
         if other:
             parts.append("/".join(other))
         return f"[{', '.join(parts)}]"
@@ -209,7 +208,7 @@ def _collect_missing(
             branch: list[str] = []
             _collect_missing(child, completed, known, planned, branch)
             if not branch:
-                return  # this branch is fully satisfied - OR is satisfied
+                return  # this branch is fully satisfied, OR is satisfied
             branch_missing.append(branch)
         # No branch fully satisfied: report missing from the branch with fewest gaps
         if branch_missing:
@@ -254,8 +253,8 @@ def _print_elective_suggestions(
         for level, code, title in suggestions:
             course = courses[code]
             title_short = title if len(title) <= 48 else title[:45] + "..."
-            sems = sorted({o.semester for o in course.offerings
-                           if o.campus == campus and o.mode == mode})
+            sems = sort_semesters(o.semester for o in course.offerings
+                           if o.campus == campus and o.mode == mode)
             sem_str = "/".join(sems) if sems else "?"
             print(f"    {code}  L{level}  {course.credits:>3}cr  [{sem_str}]  {title_short}")
         remaining = gap - sum(courses[code].credits for _, code, _ in suggestions)
@@ -325,12 +324,16 @@ def _export_plan_html(
 ) -> Path:
     """Export the degree plan as a self-contained HTML file."""
     semesters_html = ""
+    has_unverified_prereq = False
     for i, semester in enumerate(plan.semesters):
         rows = ""
         for course in semester.courses:
             title = course.title
             fy_badge = ' <span style="font-size:10px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;margin-left:4px">FY</span>' if any(getattr(o, "full_year", False) for o in course.offerings) else ""
-            prereq_dot = '<span style="color:#e74c3c;font-weight:700;margin-right:4px" title="No prerequisite data - verify before enrolling">•</span>' if course.prerequisites is None and course.level >= 200 else ""
+            is_unverified = course.prerequisites is None and course.level >= 200
+            if is_unverified:
+                has_unverified_prereq = True
+            prereq_dot = '<span style="color:#e74c3c;font-weight:700;margin-right:4px" title="No prerequisite data, verify before enrolling">•</span>' if is_unverified else ""
             rows += f"""
             <tr>
               <td class="code">{course.code}</td>
@@ -365,8 +368,8 @@ def _export_plan_html(
         rows = ""
         for level, code, title in elective_suggestions:
             cr = courses[code].credits
-            sems = sorted({o.semester for o in courses[code].offerings
-                           if o.campus == campus and o.mode == mode})
+            sems = sort_semesters(o.semester for o in courses[code].offerings
+                           if o.campus == campus and o.mode == mode)
             sem_str = "/".join(sems)
             rows += f"""
             <tr>
@@ -385,6 +388,14 @@ def _export_plan_html(
     prior_cr   = plan.prior_credits()
     total_cr   = summary_cr + prior_cr
     sems       = len(plan.semesters)
+
+    _unverified_prereq_html = (
+        '<p style="font-size:0.78rem;color:#c0392b;margin-bottom:1rem">'
+        '<span style="font-weight:700;margin-right:4px">&bull;</span> '
+        "No prerequisite data recorded for this course. This usually "
+        "means the data wasn't captured, not that there isn't one. "
+        "Check massey.ac.nz before enrolling.</p>"
+    )
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -453,7 +464,7 @@ def _export_plan_html(
     color: var(--muted);
   }}
 
-  .meta-row span {{ display: flex; align-items: center; gap: 0.4rem; }}
+  .meta-row span {{ display: flex; align-items: center; gap: 0.4rem; margin-right: 1.5rem; }}
 
   .summary-bar {{
     display: grid;
@@ -612,6 +623,8 @@ def _export_plan_html(
   <div class="semesters">{semesters_html}</div>
 
   {electives_html}
+
+  {_unverified_prereq_html if has_unverified_prereq else ''}
 
   <footer>Generated by coursemap · Verify all requirements with Massey University before enrolling.</footer>
 </div>
@@ -910,8 +923,8 @@ def _print_elective_section(
             if code not in courses:
                 continue
             course = courses[code]
-            sems_avail = sorted({o.semester for o in course.offerings
-                                 if o.campus == campus and o.mode == mode})
+            sems_avail = sort_semesters(o.semester for o in course.offerings
+                                 if o.campus == campus and o.mode == mode)
             sem_str = "/".join(sems_avail) if sems_avail else "?"
             title   = course.title if len(course.title) <= 48 else course.title[:45] + "..."
             print(f"    {code}  L{course.level}  {course.credits:>3}cr  [{sem_str}]  {title}")
@@ -1229,7 +1242,7 @@ def _cmd_plan(args: argparse.Namespace) -> None:
         double_info=double_info,
     )
 
-    # --format json: machine-readable output only - suppress terminal display.
+    # --format json: machine-readable output only, suppress terminal display.
     if output_format == "json":
         print(f"Plan written to {output_path}", file=sys.stderr)
         return
@@ -1343,10 +1356,11 @@ def _cmd_validate(args: argparse.Namespace) -> None:
 def _cmd_data_quality(args: argparse.Namespace) -> None:
     """Print a structured data quality report for the bundled datasets."""
     import json
-    from collections import Counter
-    from pathlib import Path
     from coursemap.ingestion.dataset_loader import load_courses, load_majors, DATASET_PATH
     from coursemap.ingestion.freshness import freshness_report as dataset_freshness
+    from coursemap.ingestion.prereq_coverage import prereq_coverage_summary
+
+    json_out = getattr(args, "json_out", False)
 
     try:
         courses = load_courses()
@@ -1359,77 +1373,30 @@ def _cmd_data_quality(args: argparse.Namespace) -> None:
     fresh = dataset_freshness()
     scrape_date = fresh.get("scrape_date", "unknown")
     is_stale    = fresh.get("is_stale", False)
-    stale_label = "  ⚠  STALE - run `coursemap refresh-prerequisites`" if is_stale else "  ✓"
-
-    print("╔══════════════════════════════════════════════════════════════╗")
-    print("║              coursemap · Data Quality Report                ║")
-    print("╚══════════════════════════════════════════════════════════════╝")
-    print()
-    print(f"  Dataset date   : {scrape_date}{stale_label}")
-    print()
 
     # ── Courses ────────────────────────────────────────────────────────────
     total_courses = len(courses)
     active        = sum(1 for c in courses.values() if c.offerings)
     no_offerings  = total_courses - active
 
-    # Prerequisite format distribution (from raw JSON, not loaded domain)
+    # Prerequisite format distribution (from raw JSON, not loaded domain).
+    # Shared with /api/data-quality in server.py, see prereq_coverage.py.
     with open(DATASET_PATH, encoding="utf-8") as f:
         raw_courses = json.load(f)
 
-    fmt_counts: dict[str, int] = Counter()
-    for c in raw_courses:
-        pval = c.get("prerequisites")
-        if pval is None:
-            fmt_counts["null (never scraped)"] += 1
-        elif isinstance(pval, list):
-            fmt_counts["flat list (old scraper)"] += 1
-        elif isinstance(pval, dict):
-            fmt_counts["AND/OR tree (new scraper)"] += 1
-        elif isinstance(pval, str):
-            fmt_counts["single code (new scraper)"] += 1
-        else:
-            fmt_counts[f"unknown ({type(pval).__name__})"] += 1
-
-    new_format = fmt_counts.get("AND/OR tree (new scraper)", 0) + fmt_counts.get("single code (new scraper)", 0)
-    old_format = fmt_counts.get("flat list (old scraper)", 0)
-    null_format = fmt_counts.get("null (never scraped)", 0)
-    coverage_pct = round(100 * new_format / total_courses) if total_courses else 0
+    coverage = prereq_coverage_summary(raw_courses)
+    new_format   = coverage["and_or_structured"]
+    old_format   = coverage["flat_list"]
+    null_format  = coverage["null"]
+    coverage_pct = coverage["coverage_pct"]
+    to_rescrape  = coverage["to_rescrape"]
 
     # After loading: how many resolve to real prerequisites?
     with_real_prereqs = sum(1 for c in courses.values() if c.prerequisites is not None)
     null_after_load   = total_courses - with_real_prereqs
 
-    print(f"  Courses (total)     : {total_courses}")
-    print(f"  With offerings      : {active}  ({round(100*active/total_courses)}%)")
-    print(f"  No offering data    : {no_offerings}  (postgrad / inactive)")
-    print()
-    print("  Prerequisite data format")
-    print(f"    AND/OR structured : {new_format:5d}  ({coverage_pct}%)   ← correct, HTML-aware")
-    print(f"    Flat list (old)   : {old_format:5d}  ({round(100*old_format/total_courses)}%)   ← noisy, cross-subject prereqs dropped")
-    print(f"    Null              : {null_format:5d}  ({round(100*null_format/total_courses)}%)   ← never scraped")
-    print()
-    print(f"  After plausibility filter")
-    print(f"    Courses with prereqs : {with_real_prereqs}  ({round(100*with_real_prereqs/total_courses)}%)")
-    print(f"    Prereqs = None       : {null_after_load}  ({round(100*null_after_load/total_courses)}%)")
-    print()
-
-    if old_format > 0 or null_format > 0:
-        to_rescrape = old_format + null_format
-        est_min = round(to_rescrape / 20 * 0.4 / 60, 1)
-        print(f"  ⚠  {to_rescrape} courses need re-scraping to get structured prerequisites.")
-        print(f"     Run:  python -m coursemap.ingestion.refresh_prerequisites")
-        print(f"     Estimated time: ~{est_min} min at 20 workers")
-        print()
-
     # ── Level distribution ──────────────────────────────────────────────────
     level_dist = Counter(c.level for c in courses.values())
-    print("  Level distribution")
-    for level in sorted(level_dist):
-        bar_width = round(level_dist[level] / total_courses * 30)
-        bar = "█" * bar_width
-        print(f"    L{level:<4d} : {level_dist[level]:4d}  {bar}")
-    print()
 
     # ── Majors ─────────────────────────────────────────────────────────────
     import re as _re
@@ -1444,15 +1411,6 @@ def _cmd_data_quality(args: argparse.Namespace) -> None:
     ug_total     = sum(qual_dist[k] for k in ug_keys)
     pg_total     = sum(qual_dist[k] for k in pg_keys)
 
-    print(f"  Majors (total)      : {total_majors}")
-    print(f"    Undergraduate     : {ug_total}")
-    print(f"    Postgraduate      : {pg_total}")
-    print()
-    print("  Top qualification types")
-    for qual, count in qual_dist.most_common(8):
-        print(f"    {count:3d}  {qual}")
-    print()
-
     # ── Cross-subject prereqs lost to plausibility filter ─────────────────
     cross_subject_lost = 0
     for c in raw_courses:
@@ -1465,20 +1423,94 @@ def _cmd_data_quality(args: argparse.Namespace) -> None:
                     cross_subject_lost += 1
                     break
 
+    if json_out:
+        report = {
+            "dataset_date": scrape_date,
+            "is_stale": is_stale,
+            "courses": {
+                "total": total_courses,
+                "with_offerings": active,
+                "no_offering_data": no_offerings,
+            },
+            "prerequisite_format": {
+                "and_or_structured": new_format,
+                "coverage_pct": coverage_pct,
+                "flat_list_old": old_format,
+                "null_never_scraped": null_format,
+                "courses_with_prereqs_after_load": with_real_prereqs,
+                "courses_null_after_load": null_after_load,
+                "to_rescrape": to_rescrape,
+            },
+            "level_distribution": {str(lvl): count for lvl, count in sorted(level_dist.items())},
+            "majors": {
+                "total": total_majors,
+                "undergraduate": ug_total,
+                "postgraduate": pg_total,
+                "top_qualification_types": dict(qual_dist.most_common(8)),
+            },
+            "cross_subject_prereqs_lost": cross_subject_lost,
+        }
+        print(json.dumps(report, indent=2))
+        return
+
+    stale_label = "  ⚠  STALE: run `coursemap refresh-prerequisites`" if is_stale else "  ✓"
+
+    print("╔══════════════════════════════════════════════════════════════╗")
+    print("║              coursemap · Data Quality Report                ║")
+    print("╚══════════════════════════════════════════════════════════════╝")
+    print()
+    print(f"  Dataset date   : {scrape_date}{stale_label}")
+    print()
+
+    print(f"  Courses (total)     : {total_courses}")
+    print(f"  With offerings      : {active}  ({round(100*active/total_courses)}%)")
+    print(f"  No offering data    : {no_offerings}  (postgrad / inactive)")
+    print()
+    print("  Prerequisite data format")
+    print(f"    AND/OR structured : {new_format:5d}  ({coverage_pct}%)   \u2190 correct, HTML-aware")
+    print(f"    Flat list (old)   : {old_format:5d}  ({round(100*old_format/total_courses)}%)   \u2190 noisy, cross-subject prereqs dropped")
+    print(f"    Null              : {null_format:5d}  ({round(100*null_format/total_courses)}%)   \u2190 never scraped")
+    print()
+    print(f"  After plausibility filter")
+    print(f"    Courses with prereqs : {with_real_prereqs}  ({round(100*with_real_prereqs/total_courses)}%)")
+    print(f"    Prereqs = None       : {null_after_load}  ({round(100*null_after_load/total_courses)}%)")
+    print()
+
+    if old_format > 0 or null_format > 0:
+        est_min = round(to_rescrape / 20 * 0.4 / 60, 1)
+        print(f"  ⚠  {to_rescrape} courses need re-scraping to get structured prerequisites.")
+        print(f"     Run:  python -m coursemap.ingestion.refresh_prerequisites")
+        print(f"     Estimated time: ~{est_min} min at 20 workers")
+        print()
+
+    print("  Level distribution")
+    for level in sorted(level_dist):
+        bar_width = round(level_dist[level] / total_courses * 30)
+        bar = "█" * bar_width
+        print(f"    L{level:<4d} : {level_dist[level]:4d}  {bar}")
+    print()
+
+    print(f"  Majors (total)      : {total_majors}")
+    print(f"    Undergraduate     : {ug_total}")
+    print(f"    Postgraduate      : {pg_total}")
+    print()
+    print("  Top qualification types")
+    for qual, count in qual_dist.most_common(8):
+        print(f"    {count:3d}  {qual}")
+    print()
+
     if cross_subject_lost > 0:
         print(f"  Cross-subject prereqs lost to plausibility filter: ~{cross_subject_lost} courses")
         print(f"  (These will be recovered when re-scraping with the HTML-aware scraper)")
         print()
 
-    # ── Recommendation summary ─────────────────────────────────────────────
-    to_rescrape = old_format + null_format
     print("  Recommendations")
     if new_format == total_courses:
         print("    ✓ All courses use structured prerequisite format.")
     else:
         print(f"    ① Run refresh_prerequisites to upgrade {to_rescrape} courses  [HIGH IMPACT]")
     if is_stale:
-        print("    ② Dataset is stale - re-run ingestion to get current offerings")
+        print("    ② Dataset is stale, re-run ingestion to get current offerings")
     else:
         print("    ✓ Dataset freshness OK")
     print()
@@ -1516,6 +1548,23 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    # Windows terminals commonly default to a legacy codepage (cp1252 etc.)
+    # rather than UTF-8. This CLI prints unicode symbols (⚠, ✓) and, more
+    # importantly, real course titles that can contain macrons (e.g. "Māori"
+    # papers, \u0101/\u012b/\u014d/\u016b/\u1e93), so the default codepage
+    # reliably crashes with UnicodeEncodeError on Windows the moment a
+    # command touches either. errors="replace" means a genuinely unmappable
+    # character degrades to "?" instead of crashing the whole command, since
+    # a partially-garbled line is far better than the CLI being unusable on
+    # Windows. hasattr-guarded because not every stream stdout/stderr could
+    # be swapped to (e.g. some test harnesses) implements .reconfigure().
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass  # best-effort; don't let this crash the CLI before it starts
+
     parser = argparse.ArgumentParser(
         prog="coursemap",
         description="Degree planner for Massey University.",
@@ -1545,7 +1594,6 @@ def main() -> None:
                           help="Filter by minor name (partial match).")
     minors_p.add_argument("--quality", choices=["scraped", "inferred"],
                           help="Filter by data quality.")
-    minors_p.set_defaults(func=_cmd_minors)
 
     # -- courses --------------------------------------------------------------
     courses_p = sub.add_parser("courses", help="Browse the course catalogue.")
@@ -1595,7 +1643,10 @@ def main() -> None:
     plan_p.add_argument("--output", metavar="FILE",
                         help="Output JSON path (default: plan.json).")
     plan_p.add_argument("--no-summer", dest="no_summer", action="store_true", default=True,
-                        help="Skip Summer School (SS) semesters.")
+                        help="Skip Summer School (SS) semesters (default: on).")
+    plan_p.add_argument("--allow-summer", dest="no_summer", action="store_false",
+                        help="Allow Summer School (SS) courses to be scheduled "
+                             "(overrides --no-summer, which is on by default).")
     plan_p.add_argument("--auto-fill", dest="auto_fill", action="store_true", default=False,
                         help="Auto-select subject-area electives to fill the free-elective gap.")
     plan_p.add_argument("--explain", action="store_true", default=False,
