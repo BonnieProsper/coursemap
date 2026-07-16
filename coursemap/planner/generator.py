@@ -200,6 +200,7 @@ class PlanGenerator:
         no_summer: bool = False,
         required_zero_credit_codes: frozenset = frozenset(),
         enforce_level_progression: bool = True,
+        allow_required_level_progression_shortfall: bool = False,
     ):
         self.courses = courses
         self.max_credits = max_credits_per_semester
@@ -213,9 +214,57 @@ class PlanGenerator:
         self.no_summer = no_summer
         self.required_zero_credit_codes: frozenset = required_zero_credit_codes
         self.enforce_level_progression = enforce_level_progression
+        # Only ever set True as a FALLBACK, after a strict discovery pass has
+        # already failed, see generate_double_major_plan's docstring. Never
+        # set for the single strict/final pass that actually gets returned
+        # to the caller, so this can only make an otherwise-impossible
+        # discovery plan possible, never change the result for anything that
+        # already worked.
+        self.allow_required_level_progression_shortfall = allow_required_level_progression_shortfall
+        self.deferred_codes: set[str] = set()
         self._known_codes: set[str] = set(self.courses)
         self.filler_codes: frozenset = frozenset()  # set via generate_filled_plan
         self.stats: PlanStats = PlanStats()
+
+    def _blocked_only_by_level_progression(
+        self,
+        remaining: set[str],
+        completed: set[str],
+    ) -> set[str]:
+        """
+        Return the subset of `remaining` that is blocked ONLY by the
+        level-progression gate right now, i.e. every other check
+        (offering, SS-only, restriction, prerequisites) already passes.
+
+        Used by the deadlock handler in `generate()` to distinguish "this
+        course needs credit that will never materialise from the current
+        requirement tree alone" (safe to defer during a discovery pass, see
+        allow_required_level_progression_shortfall) from "this course is
+        blocked for a real, unrelated reason" (never safe to paper over,
+        deferring it would hide a genuine data or campus/mode problem).
+        """
+        blocked: set[str] = set()
+        for code in remaining:
+            course = self.courses[code]
+            matching = [
+                o for o in course.offerings
+                if o.campus == self.campus and o.mode == self.mode
+            ]
+            if not matching:
+                continue
+            if self.no_summer and all(o.semester == "SS" for o in matching):
+                continue
+            if course.restrictions:
+                known_restrictions = course.restrictions & self._known_codes
+                if known_restrictions & completed:
+                    continue
+            if not prereqs_met(course.prerequisites, completed, self._known_codes):
+                continue
+            if self.enforce_level_progression and _level_progression_blocked(
+                course.level, completed, self.courses
+            ):
+                blocked.add(code)
+        return blocked
 
     def generate(self) -> DegreePlan:
         self.stats = PlanStats()
@@ -290,6 +339,22 @@ class PlanGenerator:
 
             if not eligible:
                 if not self._any_future_possible(remaining, completed):
+                    deferrable = (
+                        self._blocked_only_by_level_progression(remaining, completed)
+                        if self.allow_required_level_progression_shortfall
+                        else set()
+                    )
+                    if deferrable:
+                        self.deferred_codes |= deferrable
+                        remaining -= deferrable
+                        logger.debug(
+                            "Deferred %d course(s) permanently blocked by level "
+                            "progression, discovery pass continuing: %s",
+                            len(deferrable), sorted(deferrable)[:5],
+                        )
+                        if not remaining:
+                            break
+                        continue
                     blocked = sorted(remaining)[:5]
                     campus_mode = f"{self.campus}/{self.mode}"
                     raise ValueError(

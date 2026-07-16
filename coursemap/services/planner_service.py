@@ -501,6 +501,7 @@ class PlannerService:
         excluded_courses: frozenset = frozenset(),
         no_summer: bool = True,
         transfer_credits: int = 0,
+        _allow_level_progression_shortfall: bool = False,
     ) -> tuple["DegreePlan", dict]:
         """
         Generate a combined degree plan for two concurrent majors.
@@ -521,6 +522,22 @@ class PlannerService:
 
         Raises ValueError if either major cannot be resolved or no valid plan
         can be produced for the merged working set.
+
+        _allow_level_progression_shortfall is internal, default False so
+        every existing caller (including this method's own default use)
+        behaves byte-for-byte identically to before this parameter existed.
+        generate_filled_double_major_plan is the only caller that ever
+        passes True, and only as a FALLBACK after a first, strict call
+        (default False) has already raised. A previous attempt made
+        discovery unconditionally tolerant instead of a fallback, which
+        changed pool-selection behaviour for double majors that were
+        already working fine and caused net regressions (see
+        CHANGELOG.md). The fallback structure means this can only ever
+        rescue a combination that would otherwise fail outright, never
+        change the result for one that already succeeds.
+
+        Even as a fallback this doesn't fully solve every case: see
+        DATA_QUALITY.md's double-major section for what's still open.
         """
         # Resolve both majors.
         first_resolved  = self._resolve_major(major_name)
@@ -606,9 +623,11 @@ class PlannerService:
             prior_completed=prior_completed,
             preferred_electives=preferred_electives,
             excluded_courses=excluded_courses,
+            allow_level_progression_shortfall=_allow_level_progression_shortfall,
         )
         plan = search.search()
         self.last_plan_stats = search.best_generator_stats
+        self.last_needed_levels = dict(search.last_needed_levels)
 
         # Reattach prior-completed course objects.
         if prior_completed:
@@ -1562,21 +1581,49 @@ class PlannerService:
         from coursemap.optimisation.search import PlanSearch as _PlanSearch
 
         # --- Step 1: generate the unfilled double-major plan -----------------
-        base_plan, info = self.generate_double_major_plan(
-            major_name=major_name,
-            second_major_name=second_major_name,
-            max_credits_per_semester=max_credits_per_semester,
-            max_courses_per_semester=max_courses_per_semester,
-            campus=campus,
-            mode=mode,
-            start_year=start_year,
-            start_semester=start_semester,
-            prior_completed=prior_completed,
-            preferred_electives=preferred_electives,
-            excluded_courses=excluded_courses,
-            no_summer=no_summer,
-            transfer_credits=transfer_credits,
-        )
+        # Try the strict (default) call first, exactly as before this
+        # fallback existed. Only on failure retry with
+        # _allow_level_progression_shortfall=True. This ordering matters: a
+        # double major that already succeeds strictly is completely
+        # unaffected by the fallback machinery below, since it never runs.
+        # An earlier attempt made the discovery pass unconditionally
+        # tolerant instead, which changed pool-selection behaviour (and
+        # therefore results) for double majors that were already working,
+        # and caused net regressions across the test suite. See
+        # DATA_QUALITY.md's double-major section and CHANGELOG.md.
+        try:
+            base_plan, info = self.generate_double_major_plan(
+                major_name=major_name,
+                second_major_name=second_major_name,
+                max_credits_per_semester=max_credits_per_semester,
+                max_courses_per_semester=max_courses_per_semester,
+                campus=campus,
+                mode=mode,
+                start_year=start_year,
+                start_semester=start_semester,
+                prior_completed=prior_completed,
+                preferred_electives=preferred_electives,
+                excluded_courses=excluded_courses,
+                no_summer=no_summer,
+                transfer_credits=transfer_credits,
+            )
+        except ValueError:
+            base_plan, info = self.generate_double_major_plan(
+                major_name=major_name,
+                second_major_name=second_major_name,
+                max_credits_per_semester=max_credits_per_semester,
+                max_courses_per_semester=max_courses_per_semester,
+                campus=campus,
+                mode=mode,
+                start_year=start_year,
+                start_semester=start_semester,
+                prior_completed=prior_completed,
+                preferred_electives=preferred_electives,
+                excluded_courses=excluded_courses,
+                no_summer=no_summer,
+                transfer_credits=transfer_credits,
+                _allow_level_progression_shortfall=True,
+            )
 
         # --- Step 2: compute gap ---------------------------------------------
         # degree_target is NOT simply the qualification minimum (e.g. 360cr
@@ -1611,6 +1658,11 @@ class PlannerService:
         planned_codes = {c.code for s in base_plan.semesters for c in s.courses}
         prior_codes   = {c.code for c in base_plan.prior_completed}
 
+        # Capture immediately: nothing between Step 1 returning and here runs
+        # another PlanSearch/generate_best_plan call that would overwrite
+        # self.last_needed_levels, same caution as the single-major path.
+        needed_levels = dict(self.last_needed_levels)
+
         first_resolved_tmp  = self._resolve_major(major_name)
         second_resolved_tmp = self._resolve_major(second_major_name)
         dm_pool_codes: set[str] = set()
@@ -1640,6 +1692,7 @@ class PlannerService:
             excluded_courses=excluded_courses,
             extra_exclude=(dm_pool_codes & planned_codes),  # only exclude already-planned pool codes
             major_names=[major_name, second_major_name],
+            needed_levels=needed_levels,
             level_credit_limits=level_credit_limits,
             level_floor_priority=dist_needed_levels,
         )
