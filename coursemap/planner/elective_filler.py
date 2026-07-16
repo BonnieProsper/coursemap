@@ -44,6 +44,7 @@ class FillerCandidate:
     level: int
     prefix: str          # subject-area prefix (first 3 digits of code)
     tier: int            # lower = better; see ElectiveFiller class docstring
+    restrictions: frozenset[str] = frozenset()  # this course's own restriction codes
     is_preferred: bool = False
 
 
@@ -233,6 +234,21 @@ class ElectiveFiller:
             exclude=already_in_plan,
         )
 
+        # Restrictions cut both ways and the scraped data isn't guaranteed to
+        # list a pair from both sides (Massey's own pages don't always list
+        # the reverse direction either), so precompute what's restricted BY
+        # anything already in the plan, not just what each already-planned
+        # course's own restrictions field says. Without this, a candidate
+        # like 159100 (restricted against 159101) gets recommended as filler
+        # even when 159101 is already a required course elsewhere in the
+        # same plan, and the generator correctly rejects the whole plan
+        # afterward instead of the filler just picking something else.
+        restricted_by_existing: set[str] = set()
+        for code in already_in_plan:
+            existing = self.courses.get(code)
+            if existing:
+                restricted_by_existing |= existing.restrictions
+
         candidates: list[FillerCandidate] = []
 
         for code, course in self.courses.items():
@@ -245,6 +261,10 @@ class ElectiveFiller:
             if level_cap and course.level >= level_cap:
                 continue
             if not self._prereqs_satisfiable(course, completed | set(seed_codes)):
+                continue
+            if course.restrictions & already_in_plan:
+                continue
+            if code in restricted_by_existing:
                 continue
 
             prefix = self._prefix(code)
@@ -274,6 +294,7 @@ class ElectiveFiller:
                 level=course.level,
                 prefix=prefix,
                 tier=tier,
+                restrictions=course.restrictions,
                 is_preferred=is_preferred,
             ))
 
@@ -365,6 +386,13 @@ class ElectiveFiller:
         level_floor_priority = level_floor_priority or {}
         level_running: dict[int, int] = {}
         floor_running: dict[int, int] = {}
+        # rank_candidates already excludes anything restricted against what
+        # was already in the plan BEFORE this call started. This tracks
+        # restrictions introduced by selections made DURING this call, since
+        # the ranked list is built once upfront: two candidates that
+        # restrict each other could otherwise both pass the initial ranking
+        # and both get selected in the same batch.
+        restricted_by_selected: set[str] = set()
 
         selected: list[str] = []
         running = 0
@@ -372,6 +400,8 @@ class ElectiveFiller:
             if running >= budget_credits:
                 break
             if running + cand.credits > budget_credits + overshoot_tolerance:
+                continue
+            if cand.code in restricted_by_selected or cand.restrictions & set(selected):
                 continue
             limit = level_credit_limits.get(cand.level)
             if limit is not None and level_running.get(cand.level, 0) + cand.credits > limit:
@@ -389,6 +419,7 @@ class ElectiveFiller:
             if cand.tier == 1 and floor_running.get(cand.level, 0) >= level_floor_priority.get(cand.level, 0):
                 continue
             selected.append(cand.code)
+            restricted_by_selected |= cand.restrictions
             running += cand.credits
             if limit is not None:
                 level_running[cand.level] = level_running.get(cand.level, 0) + cand.credits

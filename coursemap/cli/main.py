@@ -1401,7 +1401,7 @@ def _cmd_data_quality(args: argparse.Namespace) -> None:
     # ── Majors ─────────────────────────────────────────────────────────────
     import re as _re
     def _parse_qual(name: str) -> str:
-        parts = _re.split(r"\s+[–--]\s+", name, maxsplit=1)
+        parts = _re.split(r"\s+[\u2013\u2014-]\s+", name, maxsplit=1)
         return parts[1].strip() if len(parts) > 1 else name
 
     total_majors = len(majors)
