@@ -1,15 +1,15 @@
 {
   "meta": {
-    "major": "Computer Science \u2013 Bachelor of Information Sciences",
+    "major": "Statistics \u2013 Bachelor of Science",
     "campus": "D",
     "mode": "DIS",
     "start_year": 2026,
-    "credits_planned": 210,
+    "credits_planned": 240,
     "credits_prior": 0,
     "credits_transfer": 0,
-    "credits_total": 210,
+    "credits_total": 240,
     "degree_target": 360,
-    "free_elective_gap": 150
+    "free_elective_gap": 120
   },
   "semesters": [
     {
@@ -25,22 +25,22 @@
           "prereq_data_available": false
         },
         {
-          "code": "159101",
-          "title": "Applied Programming",
+          "code": "160101",
+          "title": "Calculus",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": false
         },
         {
-          "code": "159102",
-          "title": "Computer Science and Programming",
+          "code": "161111",
+          "title": "Applied Statistics",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": false
         },
         {
-          "code": "297101",
-          "title": "Statistical Data Science",
+          "code": "233105",
+          "title": "Our Dynamic Earth",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": false
@@ -53,6 +53,13 @@
       "credits": 60,
       "courses": [
         {
+          "code": "159102",
+          "title": "Computer Science and Programming",
+          "credits": 15,
+          "full_year": false,
+          "prereq_data_available": true
+        },
+        {
           "code": "160102",
           "title": "Algebra",
           "credits": 15,
@@ -60,25 +67,18 @@
           "prereq_data_available": false
         },
         {
-          "code": "159201",
-          "title": "Algorithms and Data Structures",
+          "code": "247111",
+          "title": "Science and Sustainability for Agriculture and Horticulture",
           "credits": 15,
           "full_year": false,
-          "prereq_data_available": true
+          "prereq_data_available": false
         },
         {
-          "code": "159223",
-          "title": "Artificial Intelligence Methods",
+          "code": "161222",
+          "title": "Design and Analysis of Experiments",
           "credits": 15,
           "full_year": false,
-          "prereq_data_available": true
-        },
-        {
-          "code": "159234",
-          "title": "Object-Oriented Programming",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": true
+          "prereq_data_available": false
         }
       ]
     },
@@ -88,22 +88,22 @@
       "credits": 45,
       "courses": [
         {
-          "code": "159224",
-          "title": "Methods in Machine Learning",
+          "code": "160211",
+          "title": "Linear Algebra",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true
         },
         {
-          "code": "159324",
-          "title": "Artificial Intelligence in Computer Vision",
+          "code": "161251",
+          "title": "Regression Modelling",
           "credits": 15,
           "full_year": false,
-          "prereq_data_available": true
+          "prereq_data_available": false
         },
         {
-          "code": "159333",
-          "title": "Programming Project",
+          "code": "233214",
+          "title": "GIS and Spatial Statistics",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true
@@ -116,22 +116,43 @@
       "credits": 45,
       "courses": [
         {
-          "code": "159261",
-          "title": "Games Programming",
+          "code": "161250",
+          "title": "Data Analysis",
+          "credits": 15,
+          "full_year": false,
+          "prereq_data_available": false
+        },
+        {
+          "code": "161324",
+          "title": "Data Mining",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true
         },
         {
-          "code": "159323",
-          "title": "Natural Language Processing and Multi-Agent Reasoning",
+          "code": "161331",
+          "title": "Biostatistics",
+          "credits": 15,
+          "full_year": false,
+          "prereq_data_available": true
+        }
+      ]
+    },
+    {
+      "year": 2028,
+      "semester": "S2",
+      "credits": 30,
+      "courses": [
+        {
+          "code": "161323",
+          "title": "Multivariate Analysis",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true
         },
         {
-          "code": "159341",
-          "title": "Programming Languages, Algorithms and Concurrency",
+          "code": "161304",
+          "title": "Statistical Modelling",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true

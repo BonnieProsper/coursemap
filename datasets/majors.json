@@ -1491,8 +1491,14 @@
           "course_code": "161111"
         },
         {
-          "type": "COURSE",
-          "course_code": "247112"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "CHOOSE_CREDITS",
@@ -1578,8 +1584,14 @@
           "course_code": "161111"
         },
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "CHOOSE_CREDITS",
@@ -1836,8 +1848,14 @@
           "course_code": "161111"
         },
         {
-          "type": "COURSE",
-          "course_code": "247112"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -9467,8 +9485,14 @@
       "type": "ALL_OF",
       "children": [
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -9528,8 +9552,14 @@
       "type": "ALL_OF",
       "children": [
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -9624,12 +9654,24 @@
           "course_code": "159102"
         },
         {
-          "type": "COURSE",
-          "course_code": "161111"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "161101",
+            "161111",
+            "161122",
+            "161140"
+          ]
         },
         {
-          "type": "COURSE",
-          "course_code": "247112"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -9688,8 +9730,14 @@
       "type": "ALL_OF",
       "children": [
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -9781,8 +9829,14 @@
           "course_code": "122102"
         },
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -9865,8 +9919,14 @@
       "type": "ALL_OF",
       "children": [
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -9989,8 +10049,14 @@
       "type": "ALL_OF",
       "children": [
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -10047,8 +10113,14 @@
       "type": "ALL_OF",
       "children": [
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -10117,8 +10189,14 @@
       "type": "ALL_OF",
       "children": [
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -10199,8 +10277,14 @@
       "type": "ALL_OF",
       "children": [
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -10286,8 +10370,14 @@
           "course_code": "162101"
         },
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
           "type": "COURSE",
@@ -10356,12 +10446,24 @@
       "type": "ALL_OF",
       "children": [
         {
-          "type": "COURSE",
-          "course_code": "247113"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "247111",
+            "247112",
+            "247113",
+            "247114"
+          ]
         },
         {
-          "type": "COURSE",
-          "course_code": "161122"
+          "type": "CHOOSE_CREDITS",
+          "credits": 15,
+          "course_codes": [
+            "161101",
+            "161111",
+            "161122",
+            "161140"
+          ]
         },
         {
           "type": "COURSE",
