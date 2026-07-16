@@ -96,6 +96,51 @@ def test_tokenize_comma_as_and():
     assert _tokenize("115230, 115231") == ["115230", "and", "115231"]
 
 
+def test_tokenize_one_of_flat_list_treats_commas_as_or():
+    """
+    Real Massey phrasing: "One of A, B, C or D" is a single enumerated
+    choice, not "A and B and C, plus one of C or D". Without this, the
+    default comma-as-AND rule made the requirement artificially strict.
+    Reproduces 161324 (Data Mining)'s real prerequisite, which was
+    incorrectly parsed as AND(161122, 297101, 161220, 161221, OR(161250,
+    161251)) before this fix.
+    """
+    assert _tokenize("One of 161122, 297101, 161220, 161221, 161250 or 161251") == [
+        "161122", "or", "297101", "or", "161220", "or", "161221", "or", "161250", "or", "161251",
+    ]
+
+
+def test_tokenize_one_of_flat_list_no_trailing_or():
+    # Massey doesn't always bother with a final "or" before the last code.
+    assert _tokenize("One of 158222, 125340, 125342") == [
+        "158222", "or", "125340", "or", "125342",
+    ]
+
+
+def test_tokenize_one_of_parenthesised_clauses_unaffected():
+    # Already unambiguous (explicit "or" inside each group, "and" between
+    # groups), so this shouldn't be touched by the flat-list rewrite.
+    text = "(One of (161122 or 161220 or 233214) and one of (160101 or 160102 or 160105))"
+    tokens = _tokenize(text)
+    assert tokens.count("and") == 1
+    assert tokens.count("or") == 4
+
+
+def test_tokenize_plain_comma_list_without_one_of_marker_is_still_and():
+    # No "one of"/"any of" marker at all: the existing comma-as-AND
+    # behaviour must be unchanged.
+    assert _tokenize("159102, 160101") == ["159102", "and", "160101"]
+
+
+def test_parse_one_of_flat_list_produces_or_expression():
+    assert parse_prerequisite_text(
+        "One of 161122, 297101, 161220, 161221, 161250 or 161251"
+    ) == {
+        "op": "OR",
+        "args": ["161122", "297101", "161220", "161221", "161250", "161251"],
+    }
+
+
 def test_tokenize_parens():
     assert _tokenize("(115230 or 115231) and 115100") == [
         "(", "115230", "or", "115231", ")", "and", "115100"
@@ -573,3 +618,173 @@ def test_scrape_course_relations_network_error_returns_empty(monkeypatch):
 
     result = scrape_course_relations("https://example.invalid/course/unreachable/")
     assert result == {"prerequisites": None, "restrictions": [], "corequisites": []}
+
+
+def test_parse_prerequisite_oxford_comma_before_and_not_dropped():
+    """
+    Regression test for a silent data-loss bug in tokenize(): a comma
+    immediately followed by a literal 'and' (the common Oxford-comma
+    phrasing "A, B, C or D, and E") emitted two adjacent 'and' tokens.
+    The grammar has no rule for two connectors in a row, so the second
+    fell through _parse_factor's "skip unexpected token" fallback as a
+    bare None operand, which dataset_loader._build_expr_from_struct then
+    silently drops as a child -- deleting a real requirement (E here)
+    from the tree instead of raising or warning about it. This made the
+    parsed requirement look weaker than the real one, the opposite
+    direction of the "one of A, B, C or D" AND-vs-OR bug documented in
+    DATA_QUALITY.md, but equally wrong.
+    """
+    result = parse_prerequisite_text(
+        "One of 161122, 297101, 161220 or 233214, and 160101"
+    )
+    assert result == {
+        "op": "AND",
+        "args": [
+            {"op": "OR", "args": ["161122", "297101", "161220", "233214"]},
+            "160101",
+        ],
+    }
+
+
+def test_parse_prerequisite_comma_and_without_one_of_clause():
+    """Same Oxford-comma bug, without a preceding 'one of' clause to obscure it."""
+    result = parse_prerequisite_text("161230 and 161231, and 160101")
+    assert result == {
+        "op": "AND",
+        "args": ["161230", "161231", "160101"],
+    }
+
+
+def test_parse_prerequisite_comma_or_still_works():
+    """The same fix must not affect a comma immediately followed by 'or'."""
+    result = parse_prerequisite_text("115230, 115231 or 115232")
+    assert result == {
+        "op": "AND",
+        "args": ["115230", {"op": "OR", "args": ["115231", "115232"]}],
+    }
+
+
+def test_parse_prerequisite_plain_comma_list_unaffected():
+    """A comma with no following connector word must still mean AND."""
+    result = parse_prerequisite_text("115230, 115231")
+    assert result == {"op": "AND", "args": ["115230", "115231"]}
+
+
+def test_parse_prerequisite_one_of_with_parens_live_case():
+    """
+    Regression test for course 123305's actual live Massey text (verified
+    against the real page, not synthesised): "One of (A, B, ...) and one
+    of (C, D, ...)". The original _ONE_OF_FLAT_RE deliberately excluded
+    any parenthesized list, on the documented assumption that Massey
+    always spells out explicit "or"s inside parens - this course's real
+    page falsified that assumption, so both parenthesized clauses fell
+    through to comma-as-AND, producing AND(AND(...), AND(...)) where the
+    second inner AND was four courses (247111-247114) that mutually
+    restrict each other - a logical impossibility to satisfy as written.
+    """
+    result = parse_prerequisite_text(
+        "One of (123101, 123102, 123104 , 123105 , 123171, 123172) "
+        "and one of ( 247111 , 247112 , 247113 , 247114 )"
+    )
+    assert result == {
+        "op": "AND",
+        "args": [
+            {"op": "OR", "args": ["123101", "123102", "123104", "123105", "123171", "123172"]},
+            {"op": "OR", "args": ["247111", "247112", "247113", "247114"]},
+        ],
+    }
+
+
+def test_parse_prerequisite_explicit_or_in_parens_unaffected():
+    """The already-correct nested explicit-'or' form must stay unaffected."""
+    result = parse_prerequisite_text(
+        "(One of (161122 or 161220 or 233214) and one of (160101 or 160102 or 160105))"
+    )
+    assert result == {
+        "op": "AND",
+        "args": [
+            {"op": "OR", "args": ["161122", "161220", "233214"]},
+            {"op": "OR", "args": ["160101", "160102", "160105"]},
+        ],
+    }
+
+
+def test_parse_prerequisite_one_of_paren_never_mismatches_unrelated_parens():
+    """
+    Hardening test: the first version of the parenthesized "one of" fix
+    used two independently-optional paren markers, which could in theory
+    match an opening paren without its closing pair (or vice versa) if an
+    unrelated paren happened to sit near the matched clause, leaving the
+    tokenized output with unbalanced parentheses. Replaced with a proper
+    alternation (fully-parenthesized clause, or fully-flat clause - never
+    a mix) before this could actually manifest in real data, but locking
+    it in here since a regex behaving correctly on the one example found
+    so far doesn't prove it handles every arrangement.
+    """
+    result = parse_prerequisite_text("(considering one of 123101, 123102, 123103) other stuff")
+    assert result == {"op": "OR", "args": ["123101", "123102", "123103"]}
+
+
+def test_parse_prerequisite_one_of_paren_with_trailing_or():
+    """A real 'or' appearing inside the parens, right before the close, must still work."""
+    result = parse_prerequisite_text("One of (123101, 123102 or 123103)")
+    assert result == {"op": "OR", "args": ["123101", "123102", "123103"]}
+
+
+def test_scrape_course_relations_diagnostics_on_success(monkeypatch):
+    """include_diagnostics=True must add _status_code/_content_length
+    without changing the original three keys' values."""
+    class _FakeResponse:
+        status_code = 200
+        text = _SAMPLE_COURSE_PAGE
+
+    monkeypatch.setattr("requests.get", lambda *a, **kw: _FakeResponse())
+
+    result = scrape_course_relations(
+        "https://example.invalid/course/159201/", include_diagnostics=True,
+    )
+    assert result["prerequisites"] == "159102"
+    assert result["restrictions"] == ["159271"]
+    assert result["corequisites"] == []
+    assert result["_status_code"] == 200
+    assert result["_content_length"] == len(_SAMPLE_COURSE_PAGE)
+
+
+def test_scrape_course_relations_diagnostics_on_non_200(monkeypatch):
+    class _FakeResponse:
+        status_code = 403
+        text = "blocked"
+
+    monkeypatch.setattr("requests.get", lambda *a, **kw: _FakeResponse())
+
+    result = scrape_course_relations(
+        "https://example.invalid/course/blocked/", include_diagnostics=True,
+    )
+    assert result["_status_code"] == 403
+    assert result["_content_length"] == len("blocked")
+
+
+def test_scrape_course_relations_diagnostics_on_exception(monkeypatch):
+    def _raise(*a, **kw):
+        raise ConnectionError("no network")
+
+    monkeypatch.setattr("requests.get", _raise)
+
+    result = scrape_course_relations(
+        "https://example.invalid/course/unreachable/", include_diagnostics=True,
+    )
+    assert result["_status_code"] is None
+    assert result["_content_length"] == 0
+
+
+def test_scrape_course_relations_default_unaffected_by_diagnostics_feature(monkeypatch):
+    """The default (include_diagnostics=False) call must have exactly the
+    original three keys - no silent shape change for existing callers."""
+    class _FakeResponse:
+        status_code = 200
+        text = _SAMPLE_COURSE_PAGE
+
+    monkeypatch.setattr("requests.get", lambda *a, **kw: _FakeResponse())
+
+    result = scrape_course_relations("https://example.invalid/course/159201/")
+    assert set(result.keys()) == {"prerequisites", "restrictions", "corequisites"}

@@ -203,6 +203,63 @@ def find_corequisite_text(soup: BeautifulSoup) -> str | None:
 # Tokenizer
 # ---------------------------------------------------------------------------
 
+# Matches a flat "one of X, Y, Z or W" / "any of X, Y, Z or W" enumeration:
+# a "one of"/"any of" marker followed by a comma-separated run of course
+# codes ending in "or CODE", either bare or wrapped in a matched pair of
+# parentheses. Matched as an alternation between "fully parenthesized"
+# and "fully flat" rather than two independently-optional paren markers,
+# so a paren is always genuinely paired or entirely absent - never a
+# partial match that could leave an unbalanced "(" or ")" in the
+# tokenized output if an unrelated paren happens to sit near the clause.
+# This is the one shape of comma that means OR (a single enumerated
+# choice), not AND (a genuine conjunction of separate requirements), the
+# exact phrasing Massey normally uses to express a plain-English "pick
+# one of these" list without bothering to write out "A or B or C or D"
+# with real "or"s. Textbook examples: "One of 161122, 297101, 161220,
+# 161221, 161250 or 161251", "One of 158222, 125340, 125342", and
+# (live-verified against course 123305's actual page) "One of (123101,
+# 123102, 123104, 123105, 123171, 123172) and one of (247111, 247112,
+# 247113, 247114)".
+_ONE_OF_FLAT_RE = re.compile(
+    r"\b(?:one|any)\s+of\s+"
+    r"(\(\s*(?:\d{3}\.?\d{3}\s*,\s*)+\d{3}\.?\d{3}(?:\s+or\s+\d{3}\.?\d{3})?\s*\)"
+    r"|(?:\d{3}\.?\d{3}\s*,\s*)+\d{3}\.?\d{3}(?:\s+or\s+\d{3}\.?\d{3})?)",
+    re.IGNORECASE,
+)
+
+
+def _normalize_one_of_commas(text: str) -> str:
+    """
+    Rewrite a flat "one of A, B, C or D" clause's commas into "or" before
+    tokenization, so the recursive-descent parser (which otherwise always
+    treats a comma as AND, see tokenize's docstring) builds an OR expression
+    for it instead of an AND. Without this, "One of 161122, 297101, 161220,
+    161221, 161250 or 161251" parsed as
+    AND(161122, 297101, 161220, 161221, OR(161250, 161251)), i.e. "all of
+    these five, plus one of the last two", when the real requirement is
+    "any single one of these six". A course whose prerequisite tree is
+    wrong in this direction looks artificially harder to satisfy than it
+    really is, which can make it permanently unschedulable even when the
+    student has met the real (much weaker) requirement.
+
+    Rewrites a flat comma run whether or not it's wrapped in a single pair
+    of parentheses directly after "one of"/"any of" - both were confirmed
+    on Massey's live pages to mean the same thing (course 123305's actual
+    prerequisite text uses exactly this parenthesized form for two
+    separate "one of" clauses joined by "and"). Does not attempt to
+    handle deeper/nested parenthesisation or explicit "or"-spelled-out
+    groups like "(One of (161122 or 161220 or 233214) and one of (160101
+    or 160102 or 160105))" - those already tokenize correctly on their
+    own since they use real "or"s, so rewriting them isn't needed and
+    isn't attempted here.
+    """
+    def _replace_commas_with_or(match: re.Match) -> str:
+        clause = match.group(1)
+        return match.group(0)[: match.start(1) - match.start(0)] + clause.replace(",", " or ")
+
+    return _ONE_OF_FLAT_RE.sub(_replace_commas_with_or, text)
+
+
 def tokenize(text: str, header: str = "prerequisite") -> list:
     """
     Tokenize section text into a flat list of:
@@ -215,15 +272,21 @@ def tokenize(text: str, header: str = "prerequisite") -> list:
     The section header (e.g. "Prerequisite(s):", "Restrictions") is stripped
     first, using the regex for `header` ("prerequisite", "restriction", or
     "corequisite"; defaults to "prerequisite" for backward compatibility).
-    Dotted codes ("115.230") are normalised to "115230". Any other word
-    (including phrases like "One of" in corequisite text) is skipped
-    character by character rather than tokenized, so unexpected phrasing
-    degrades to "no structure found" instead of raising.
+    A flat "one of A, B, C or D" enumeration has its commas normalised to
+    "or" before the rest of tokenization runs, see
+    _normalize_one_of_commas. Dotted codes ("115.230") are normalised to
+    "115230". Any other word (including phrases like "One of" in
+    corequisite text) is skipped character by character rather than
+    tokenized, so unexpected phrasing degrades to "no structure found"
+    instead of raising.
     """
-    # Normalise dotted course codes: '115.230' → '115230'
-    text = _DOTTED_CODE_RE.sub(lambda m: m.group(1) + m.group(2), text)
     # Remove leading section header, e.g. "Prerequisite(s):" or "Restrictions"
     text = _HEADER_RE[header].sub("", text)
+    # Rewrite "one of A, B, C or D" before dot-normalisation, since the
+    # regex above matches dotted or plain codes either way.
+    text = _normalize_one_of_commas(text)
+    # Normalise dotted course codes: '115.230' → '115230'
+    text = _DOTTED_CODE_RE.sub(lambda m: m.group(1) + m.group(2), text)
 
     tokens = []
     i = 0
@@ -244,8 +307,27 @@ def tokenize(text: str, header: str = "prerequisite") -> list:
             i += 1
 
         elif ch == ",":
-            # Comma acts as implicit AND
-            tokens.append("and")
+            # Comma acts as implicit AND, UNLESS it's immediately followed
+            # (after whitespace) by a literal 'and' or 'or' -- the common
+            # Oxford-comma phrasing "A, B, C or D, and E" ends its
+            # enumeration with a real connector word right after the
+            # comma. Emitting a token for the comma there would produce
+            # two adjacent connector tokens ("and", "and"), which the
+            # grammar has no rule for: the second one falls through
+            # _parse_factor's "skip unexpected token" fallback and comes
+            # back as a bare None operand, silently deleting whatever
+            # follows it once _build_expr_from_struct drops the None
+            # child. Skip the comma itself here and let the real word
+            # supply the one connector token that's actually meant.
+            j = i + 1
+            while j < n and text[j].isspace():
+                j += 1
+            nxt3 = text[j : j + 3].lower()
+            nxt2 = text[j : j + 2].lower()
+            is_and = nxt3 == "and" and (j + 3 >= n or not text[j + 3].isalnum())
+            is_or = nxt2 == "or" and (j + 2 >= n or not text[j + 2].isalnum())
+            if not (is_and or is_or):
+                tokens.append("and")
             i += 1
 
         elif text[i : i + 3].lower() == "and" and (
@@ -417,6 +499,41 @@ _DEFAULT_HEADERS: dict[str, str] = {
 }
 
 
+def _extract_prerequisite_codes(node: Any) -> set[str]:
+    """
+    Flatten a prerequisite tree (None | str | {"op": "AND"|"OR", "args": [...]})
+    into the flat set of every course code appearing anywhere in it,
+    regardless of AND/OR structure or nesting depth.
+
+    Used by refresh_prerequisites.py to compare a freshly-scraped result
+    against a course's currently-stored value: if the fresh set is a
+    strict subset of the stored set, that's treated as a suspicious
+    regression rather than trusted data (see DATA_QUALITY.md - a real
+    production incident where sustained scraping returned an apparently
+    healthy HTTP 200 response containing fewer prerequisite codes than
+    were already known-correct, for several different courses, byte-for-
+    byte identically across two separate runs).
+
+    Deliberately structure-blind: does not distinguish "A or B" from
+    "A and B" if both mention the same codes. Every real corrupted case
+    found in that incident was a straightforward subset (fewer codes,
+    same meaning otherwise), never a structural swap with the same code
+    set - so structure-blindness is a known, accepted scope boundary,
+    not an oversight. A tree that keeps the same codes but changes AND
+    to OR (or vice versa) would not be caught by this function.
+    """
+    if node is None:
+        return set()
+    if isinstance(node, str):
+        return {node}
+    if isinstance(node, dict):
+        codes: set[str] = set()
+        for arg in node.get("args", []):
+            codes |= _extract_prerequisite_codes(arg)
+        return codes
+    return set()
+
+
 def scrape_prerequisites(url: str, timeout: int = 10) -> Any:
     """
     Fetch a course page and return a structured prerequisite tree, or None.
@@ -453,7 +570,9 @@ def scrape_prerequisites(url: str, timeout: int = 10) -> Any:
         return None
 
 
-def scrape_course_relations(url: str, timeout: int = 10) -> dict[str, Any]:
+def scrape_course_relations(
+    url: str, timeout: int = 10, include_diagnostics: bool = False,
+) -> dict[str, Any]:
     """
     Fetch a course page once and extract prerequisites, restrictions, and
     corequisites together.
@@ -467,11 +586,25 @@ def scrape_course_relations(url: str, timeout: int = 10) -> dict[str, Any]:
 
     All three fall back to their empty value (None / [] / []) on fetch
     failure, a non-200 response, or a parse error, so a course with a
-    genuinely-empty section is indistinguishable from a fetch failure here.
-    Callers that need to tell those apart should check the HTTP status
-    separately; this dataset does not currently track that distinction (see
-    DATA_QUALITY.md's note that "no data recorded" means "unverified," not
-    "confirmed none").
+    genuinely-empty section is indistinguishable from a fetch failure here
+    UNLESS include_diagnostics=True (default False, so every existing
+    caller's exact 3-key return shape is completely unchanged).
+
+    When include_diagnostics=True, two extra keys are added:
+        "_status_code":    int | None   (None means a request exception,
+                                          not a non-200 response)
+        "_content_length":  int          (len(r.text); 0 on total failure)
+
+    This closes a real gap found in production: a full refresh_prerequisites
+    run silently corrupted several courses' data under sustained concurrent
+    load, and not always via an HTTP error - one confirmed case came back
+    HTTP 200 with a truncated page body (a complete OR-group choice cut
+    short, and a second required course silently missing entirely), which
+    an error-only check wouldn't have caught. _content_length lets a
+    caller compare against the ~9800-11100 byte range every genuinely
+    healthy Massey course page was observed at throughout this
+    investigation, and retry anything drastically smaller as suspected
+    truncation, not just outright failures.
     """
     import requests
     from bs4 import BeautifulSoup
@@ -481,7 +614,11 @@ def scrape_course_relations(url: str, timeout: int = 10) -> dict[str, Any]:
         r = requests.get(url, timeout=timeout, headers=_DEFAULT_HEADERS)
         if r.status_code != 200:
             logger.debug("HTTP %d for %s", r.status_code, url)
-            return empty
+            result = dict(empty)
+            if include_diagnostics:
+                result["_status_code"] = r.status_code
+                result["_content_length"] = len(r.text)
+            return result
 
         soup = BeautifulSoup(r.text, "html.parser")
 
@@ -489,15 +626,23 @@ def scrape_course_relations(url: str, timeout: int = 10) -> dict[str, Any]:
         restriction_text = find_restriction_text(soup)
         coreq_text = find_corequisite_text(soup)
 
-        return {
+        result = {
             "prerequisites": parse_prerequisite_text(prereq_text) if prereq_text else None,
             "restrictions": parse_code_list_text(restriction_text, header="restriction") if restriction_text else [],
             "corequisites": parse_code_list_text(coreq_text, header="corequisite") if coreq_text else [],
         }
+        if include_diagnostics:
+            result["_status_code"] = 200
+            result["_content_length"] = len(r.text)
+        return result
 
     except Exception as exc:
         logger.debug("Failed to scrape course relations from %s: %s", url, exc)
-        return empty
+        result = dict(empty)
+        if include_diagnostics:
+            result["_status_code"] = None
+            result["_content_length"] = 0
+        return result
 
 
 # ---------------------------------------------------------------------------
