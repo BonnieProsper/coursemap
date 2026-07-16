@@ -562,15 +562,28 @@ class PlanSearch:
         pure_elective_nodes = [
             type(n)(
                 credits=n.credits,
-                course_codes=tuple(
-                    c for c in n.course_codes if c in pure_elective_pool_codes
-                ),
+                course_codes=n.course_codes,
             )
             for n in elective_nodes
             if pool_credit_scale > 0 and any(c in pure_elective_pool_codes for c in n.course_codes)
         ]
+        # Pass always_include_in_pool (not set()) so each pool's own credit
+        # accounting sees when one of its own members is already being taken
+        # anyway (required directly, possibly by a DIFFERENT major in a
+        # double-major combination) and correctly counts that credit toward
+        # its own target, rather than independently selecting a second pool
+        # member to reach the same credits. Without this, converting a
+        # major's single hard-required course into a shared "any one of
+        # these mutually-restricted variants" pool (done specifically to
+        # let two majors that each hard-require a DIFFERENT variant combine
+        # without conflict, see DATA_QUALITY.md) can backfire for a
+        # DIFFERENT double-major pairing where both majors already wanted
+        # the SAME variant: the pool "sees" that variant as spoken for
+        # elsewhere, strips it from its own candidate pool credit count, and
+        # picks a fresh, different (and possibly mutually-restricted)
+        # variant to fill what it wrongly still thinks is an unmet target.
         elective_codes = self._select_electives(
-            pure_elective_nodes, elective_budget, set()
+            pure_elective_nodes, elective_budget, always_include_in_pool
         )
         # Merge always_include_in_pool into elective_codes; they are required
         # but treated as electives by the working set builder.
@@ -707,6 +720,7 @@ class PlanSearch:
             no_summer=self.generator_template.no_summer,
             required_zero_credit_codes=required_zero_credit_codes,
             enforce_level_progression=enforce_level_progression,
+            allow_required_level_progression_shortfall=self.allow_level_progression_shortfall,
         )
         # Propagate filler_codes from the template so the generator's sort key
         # schedules required courses before filler electives. Without this the
@@ -732,6 +746,50 @@ class PlanSearch:
                 transfer_credits=plan.transfer_credits,
             )
 
+        self._validate_plan_with_tolerance(
+            plan, degree_tree, generator, name,
+        )
+
+        plan = self._trim_plan_to_credit_target(
+            plan, degree_total, required_codes, always_include_in_pool,
+            elective_codes, self.preferred_electives,
+        )
+
+
+        logger.info(
+            "Major '%s': %d semesters, %d credits",
+            name, len(plan.semesters), plan.total_credits() + plan.prior_credits(),
+        )
+        return plan, generator
+
+    def _validate_plan_with_tolerance(
+        self,
+        plan: DegreePlan,
+        degree_tree: RequirementNode,
+        generator: PlanGenerator,
+        name: str,
+    ) -> None:
+        """
+        Validate a generated plan against its degree tree, raising ValueError
+        on any error that isn't one of three known-tolerable shapes:
+
+        1. A "Missing required course X" where X was explicitly excluded by
+           the student (self.excluded_courses) -- the student was already
+           warned before generation; the plan is still shown.
+        2. A named elective pool falling short of its own credit target,
+           but only when self.allow_level_progression_shortfall is set (this
+           is generate_filled_plan's/generate_filled_double_major_plan's
+           discovery pass; the caller recovers the gap via its own filler
+           step and re-validates at full strictness afterward).
+        3. A required (non-pool) course missing specifically because it's in
+           generator.deferred_codes -- the same discovery-pass tolerance as
+           (2), for a required course rather than a pool shortfall.
+
+        Any other validation error raises ValueError immediately, with
+        "Missing required course X" errors rewritten into a specific
+        explanation (no matching offering, Summer-School-only while
+        --no-summer is set, etc.) rather than the bare code.
+        """
         # Step 7: validate. Skip only the specific COURSE nodes for codes the
         # student deliberately excluded. The user was warned before generation;
         # we still show the plan but note the unsatisfied requirements.
@@ -765,9 +823,27 @@ class PlanSearch:
                 if self.allow_level_progression_shortfall
                 else []
             )
+            # Same idea, for a REQUIRED (non-pool) course rather than a pool
+            # falling short: generator.deferred_codes is only ever non-empty
+            # when allow_required_level_progression_shortfall was set on it
+            # (itself only ever true here because self.allow_level_progression_shortfall
+            # is, see the PlanGenerator construction above), and only contains
+            # codes _blocked_only_by_level_progression confirmed were dropped
+            # for exactly that reason, not for an unrelated offering/
+            # restriction/prerequisite problem. Tolerating "Missing required
+            # course X" specifically for those codes, and no others, is what
+            # lets a required course sitting behind a gate neither major's
+            # own courses can ever close on their own get deferred out here
+            # and picked up for real once generate_filled_double_major_plan's
+            # filler step supplies the missing foundation credit.
+            deferred_missing = [
+                e for e in result.errors
+                if e.startswith("Missing required course ")
+                and e.split()[-1].rstrip(".") in generator.deferred_codes
+            ]
             non_excl_errors = [
                 e for e in result.errors
-                if e not in excluded_missing and e not in pool_shortfall
+                if e not in excluded_missing and e not in pool_shortfall and e not in deferred_missing
             ]
             if non_excl_errors:
                 # "Missing required course X." errors are common but unhelpful on
@@ -814,7 +890,45 @@ class PlanSearch:
                     "filler step): %s",
                     name, len(pool_shortfall), "; ".join(pool_shortfall),
                 )
+            if deferred_missing:
+                logger.debug(
+                    "Plan for '%s' is missing %d required course(s) permanently "
+                    "blocked by level progression (tolerated: deferred during "
+                    "discovery, expected to become schedulable once filler "
+                    "supplies the missing foundation credit): %s",
+                    name, len(deferred_missing),
+                    ", ".join(sorted(generator.deferred_codes)),
+                )
 
+
+    def _trim_plan_to_credit_target(
+        self,
+        plan: DegreePlan,
+        degree_total: int,
+        required_codes: set[str],
+        always_include_in_pool: set[str],
+        elective_codes,
+        preferred_electives,
+    ) -> DegreePlan:
+        """
+        Trim an over-generated plan down to the major's exact credit target.
+
+        The working-set prerequisite expansion (and the scheduler pulling in
+        prerequisite-chain courses) can produce more total credits than the
+        degree actually requires. This removes the lowest-priority courses
+        to bring the total back down to ``degree_total``, in two passes:
+
+        Pass 1 removes elective-pool courses first (highest level first),
+        since a pool has alternates and losing one member doesn't break
+        anything else. Pass 2 removes non-pool "extra" courses that were
+        only pulled in as someone else's prerequisite, recomputing what's
+        still needed from the plan as it stands *after* pass 1 (an extra
+        needed only by a pool course pass 1 just removed is correctly still
+        removable; one needed by a surviving pool course is protected).
+
+        Required courses, always-include-in-pool courses, and
+        preferred_electives are never removed.
+        """
         # Trim plan to degree_total credits.
         # The working-set prereq expansion may add more courses than needed.
         # Remove lowest-priority courses to bring total to degree_total.
@@ -871,7 +985,7 @@ class PlanSearch:
                     [c for s in plan.semesters for c in s.courses
                      if c.code in elective_codes
                      and c.code not in protected_trim
-                     and c.code not in self.preferred_electives],
+                     and c.code not in preferred_electives],
                     key=lambda c: (-c.level, c.code),
                 )
                 # Non-pool extras (prerequisite-chain courses pulled in only
@@ -880,7 +994,7 @@ class PlanSearch:
                     [c for s in plan.semesters for c in s.courses
                      if c.code not in protected_trim
                      and c.code not in elective_codes
-                     and c.code not in self.preferred_electives],
+                     and c.code not in preferred_electives],
                     key=lambda c: (-c.level, c.code),
                 )
                 removed: set[str] = set()
@@ -937,12 +1051,7 @@ class PlanSearch:
                         prior_completed=plan.prior_completed,
                         transfer_credits=plan.transfer_credits,
                     )
-
-        logger.info(
-            "Major '%s': %d semesters, %d credits",
-            name, len(plan.semesters), plan.total_credits() + plan.prior_credits(),
-        )
-        return plan, generator
+        return plan
 
     # ------------------------------------------------------------------
     # Elective selection (greedy)
@@ -1016,6 +1125,31 @@ class PlanSearch:
                 0 if code in force_include else 1,
                 0 if is_schedulable(code) else 1,
             ) + self._elective_sort_key(code)
+
+        def _conflicts_with_selected(code: str) -> bool:
+            """
+            True if `code` would trip a mutual restriction against anything
+            already in `selected` (from this pool, an earlier pool in this
+            same call, or always_include). Checked both directions since
+            scraped restriction data isn't guaranteed to list a pair from
+            both sides. Without this, two named-pool selections that
+            restrict each other (e.g. two intro-stats variants a double
+            major's separate majors each nominally require) both get
+            selected, and the scheduler correctly rejects the whole plan
+            later instead of this function just picking a different pool
+            member. Same fix, same reasoning, as ElectiveFiller's
+            restriction-awareness, see DATA_QUALITY.md.
+            """
+            course = self.courses.get(code)
+            if course is None:
+                return False
+            if course.restrictions & selected:
+                return True
+            for other in selected:
+                other_course = self.courses.get(other)
+                if other_course and code in other_course.restrictions:
+                    return True
+            return False
 
         # ----------------------------------------------------------------
         # Pass 1: pools with known credit targets.
@@ -1105,6 +1239,8 @@ class PlanSearch:
                     course = self.courses.get(code)
                     if course is None:
                         continue
+                    if _conflicts_with_selected(code):
+                        continue
                     selected.add(code)
                     if is_schedulable(code):
                         accumulated_sched += course.credits
@@ -1157,6 +1293,14 @@ class PlanSearch:
                             continue
                         course = self.courses.get(code)
                         if course is None or not is_schedulable(code):
+                            continue
+                        # A pool that already met its own target should not
+                        # gain a mutually-restricted alternative just because
+                        # leftover global budget has nowhere else to go (see
+                        # Pass 1's identical guard above). Adding one here
+                        # would make the plan unschedulable, since the
+                        # student can never actually enrol in both.
+                        if _conflicts_with_selected(code):
                             continue
                         selected.add(code)
                         remaining -= course.credits

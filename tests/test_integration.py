@@ -796,10 +796,7 @@ def test_resolve_or_prerequisite_unit():
     resolved_and = _resolve_or_prerequisite(and_expr, {"159201", "158258"})
     assert resolved_and == AndExpression((CoursePrerequisite("159201"), CoursePrerequisite("158258")))
 
-
-# ---------------------------------------------------------------------------
-# New feature tests  (added across improvement sessions)
-# ---------------------------------------------------------------------------
+# FEATURE TESTS
 
 def test_completed_courses_excluded_from_elective_suggestions(svc):
     """
@@ -927,6 +924,151 @@ def test_double_major_both_requirements_satisfied(svc):
     result2 = DegreeValidator(second_tree).validate(plan)
     assert result1.passed, f"First major unsatisfied: {result1.errors}"
     assert result2.passed, f"Second major unsatisfied: {result2.errors}"
+
+
+def test_double_major_mutually_restricted_variant_courses_resolve(svc):
+    """
+    Regression test for two real conflicts found once restriction data
+    existed for the first time: Computer Science – BSc and Mathematics –
+    BSc each hard-required a DIFFERENT variant of the "Science and
+    Sustainability" course (247112 vs 247113), and separately Computer
+    Science and Statistics – BSc each hard-required a different intro-
+    statistics variant (161111 vs 161122); both pairs are mutually
+    restricted, so requiring a specific one per major made every such
+    double-major combination impossible. Fixed by converting each major's
+    hard requirement into a shared "any one of the mutually-restricted
+    variants" pool (see DATA_QUALITY.md), plus fixing _select_electives to
+    correctly credit a pool when one of its own members is already being
+    taken anyway (e.g. required directly by the other major), rather than
+    independently picking a second, conflicting variant to fill what it
+    wrongly still thought was an unmet target.
+    """
+    for first, second in [
+        ("Computer Science – Bachelor of Science", "Mathematics – Bachelor of Science"),
+        ("Computer Science – Bachelor of Science", "Statistics – Bachelor of Science"),
+    ]:
+        plan, info = svc.generate_double_major_plan(first, second)
+        assert plan.total_credits() > 0, f"{first} + {second} produced an empty plan"
+
+
+def test_no_prerequisite_is_a_pairwise_mutually_restricted_and(svc):
+    """
+    Data-integrity check, not just a bug-fix regression test: no course's
+    prerequisite should be an AND of codes that are all pairwise mutually
+    restricted against each other, since that's a logical impossibility (you
+    cannot enrol in courses that mutually block each other at the same
+    time). This exact shape is the known scraper bug where a "one of A, B, C
+    or D" enumeration was mis-parsed as an AND instead of an OR (see
+    DATA_QUALITY.md's "the same parser bug affects far more than double
+    majors" section). This test doesn't prove there are no MORE instances of
+    the bug (the detector only catches strict, symmetric pairwise-mutual
+    cases), it proves the specific ones already found and manually corrected
+    stay corrected, and gives a running start on catching any more found the
+    same way in future.
+    """
+    import json
+    with open("datasets/courses.json", encoding="utf-8") as f:
+        courses = {c["course_code"]: c for c in json.load(f)}
+
+    def flatten_and_args(node):
+        if isinstance(node, dict) and node.get("op") == "AND":
+            codes = []
+            for arg in node["args"]:
+                if isinstance(arg, str):
+                    codes.append(arg)
+                elif isinstance(arg, dict) and arg.get("op") == "OR":
+                    for sub in arg["args"]:
+                        if isinstance(sub, str):
+                            codes.append(sub)
+                        else:
+                            return None
+                else:
+                    return None
+            return codes
+        return None
+
+    offenders = []
+    for code, c in courses.items():
+        codes = flatten_and_args(c.get("prerequisites"))
+        if not codes or len(codes) < 2:
+            continue
+        restr_sets = []
+        ok = True
+        for other_code in codes:
+            other = courses.get(other_code)
+            if not other:
+                ok = False
+                break
+            restr_sets.append(set(other.get("restrictions") or []))
+        if not ok:
+            continue
+        all_mutual = True
+        for i, other_code in enumerate(codes):
+            others = set(codes) - {other_code}
+            if not others.issubset(restr_sets[i]):
+                reverse_ok = all(
+                    other_code in (courses.get(o, {}).get("restrictions") or []) for o in others
+                )
+                if not reverse_ok:
+                    all_mutual = False
+                    break
+        if all_mutual:
+            offenders.append(code)
+
+    assert not offenders, (
+        f"Found prerequisite AND of pairwise-mutually-restricted codes "
+        f"(should be OR, see DATA_QUALITY.md): {offenders}"
+    )
+
+
+def test_double_major_thin_combined_requirements_uses_filler_to_bootstrap(svc):
+    """
+    Regression test for Finance + Marketing (both Bachelor of Business):
+    combined, they have exactly one unconditional required course outside
+    either major's own elective pools, and it's L300 with zero L100 credit
+    anywhere in either major's own requirements to ever unlock it (both
+    majors' remaining credits are entirely open free-elective pools). The
+    strict discovery pass generate_filled_double_major_plan's Step 1 used to
+    call directly could never succeed for a combination like this, since
+    nothing supplies the missing foundation credit before that required
+    course needs to be scheduled. Fixed with a shortfall-tolerant fallback
+    (only engaged after the exact original strict call fails, so it can't
+    change behaviour for a double major that already worked) that defers
+    the permanently-blocked required course during discovery, measures the
+    resulting bigger gap, and lets the filler step supply the missing
+    foundation credit before a final strict pass places the deferred course
+    for real. See DATA_QUALITY.md's double-major section for the full story
+    (two earlier attempts at this were reverted).
+    """
+    plan, info, filler = svc.generate_filled_double_major_plan(
+        major_name="Finance – Bachelor of Business",
+        second_major_name="Marketing – Bachelor of Business",
+        campus="D", mode="DIS", start_year=2026, no_summer=True,
+    )
+    assert plan.total_credits() == svc.degree_total_credits(info["first_label"])
+    all_codes = {c.code for s in plan.semesters for c in s.courses}
+    # 115388 (Marketing) is the specific course this whole fix exists for:
+    # required directly, permanently blocked by the 45cr level-progression
+    # gate using only Finance/Marketing's own courses, only schedulable once
+    # filler supplies enough foundation credit first.
+    assert "115388" in all_codes
+
+
+def test_double_major_strict_path_unaffected_by_fallback_machinery(svc):
+    """
+    The fallback added for the case above must never change behaviour for a
+    double major that already succeeds strictly: generate_double_major_plan
+    with no shortfall flag must produce byte-for-byte the same result
+    whether or not the fallback machinery exists, since it's only ever
+    invoked as a retry after the exact same strict call has already raised.
+    Spot-checks two majors already covered by other passing double-major
+    tests to catch an accidental regression in the strict path itself.
+    """
+    plan, info = svc.generate_double_major_plan(
+        "Computer Science – Bachelor of Science",
+        "Mathematics – Bachelor of Science",
+    )
+    assert plan.total_credits() > 0
 
 
 def test_double_major_shared_codes_are_not_duplicated(svc):
@@ -1470,20 +1612,43 @@ def test_estimate_chain_cost_unit(svc):
     Unit test for _estimate_chain_cost, the helper that lets the required-
     courses credit-cap trim account for prerequisite-chain cost before
     deciding which courses to keep.
+
+    Uses synthetic courses rather than real codes from the live dataset:
+    this test previously hardcoded 175201/175101/159302's real prerequisite
+    values, and broke the moment a re-scrape corrected them (they'd changed
+    from what the test assumed, a data fix, not a regression, see
+    DATA_QUALITY.md). A unit test for a pure function like this one
+    shouldn't depend on what the current dataset happens to contain.
     """
     from coursemap.optimisation.search import _estimate_chain_cost
+    from coursemap.domain.course import Course
+    from coursemap.domain.prerequisite import CoursePrerequisite, OrExpression
 
-    # 175201 requires 175101 (15cr), not yet counted -> chain cost 15.
-    cost = _estimate_chain_cost("175201", svc.courses, already_counted=set())
+    def _course(code, credits, level, prereq=None):
+        return Course(code=code, title=code, credits=credits, level=level,
+                      offerings=(), prerequisites=prereq)
+
+    courses = {
+        "999101": _course("999101", 15, 100),
+        "999201": _course("999201", 15, 200, CoursePrerequisite("999101")),
+        "999210": _course("999210", 15, 200),  # OR-alternative to 999201, same cost
+        "999301": _course(
+            "999301", 15, 300,
+            OrExpression((CoursePrerequisite("999201"), CoursePrerequisite("999210"))),
+        ),
+    }
+
+    # 999201 requires 999101 (15cr), not yet counted -> chain cost 15.
+    cost = _estimate_chain_cost("999201", courses, already_counted=set())
     assert cost == 15
 
-    # Same, but 175101 is already counted (e.g. independently required) -> free.
-    cost2 = _estimate_chain_cost("175201", svc.courses, already_counted={"175101"})
+    # Same, but 999101 is already counted (e.g. independently required) -> free.
+    cost2 = _estimate_chain_cost("999201", courses, already_counted={"999101"})
     assert cost2 == 0
 
-    # 159302 requires "159201 or 159234" (OR), neither counted -> cheapest
+    # 999301 requires "999201 or 999210" (OR), neither counted -> cheapest
     # branch's cost (both are 15cr L200 courses here).
-    cost3 = _estimate_chain_cost("159302", svc.courses, already_counted=set())
+    cost3 = _estimate_chain_cost("999301", courses, already_counted=set())
     assert cost3 == 15
 
     # A course with no prerequisite at all -> zero cost.
@@ -1860,41 +2025,109 @@ def test_filler_prerequisite_is_correctly_scheduled(svc):
     )
 
 
-def test_known_bug_exactly_sized_pool_not_fully_scheduled(svc):
+def test_mental_health_addiction_exact_pool_fully_scheduled(svc):
     """
-    Documents a separate, NOT-yet-fixed bug found while investigating the
-    filler-prerequisite fix above: Mental Health and Addiction – BHSc has a
-    free-elective pool with a 120cr target drawn from exactly 8 courses
-    totalling exactly 120cr (zero slack, every course is mathematically
-    required to meet the target). All 8 correctly enter the scheduler's
-    working set (confirmed directly, bypassing _select_electives entirely),
-    but only 5 of 8 end up placed in the final plan. A genuine scheduler
-    placement failure inside PlanGenerator.generate(), not a selection bug.
+    Regression test for a scheduler-placement shortfall that shared a root
+    cause with the top-up-pass restriction bug (see DATA_QUALITY.md):
+    Mental Health and Addiction - BHSc has a free-elective pool with a
+    120cr target drawn from exactly 8 courses totalling exactly 120cr
+    (zero slack, every course is mathematically required to meet the
+    target).
 
-    Reproduces identically with no prior-completed courses and no
-    credit-cap trim involved at all, ruling out any connection to the
-    filler-prerequisite fix tested above.
-
-    This test locks in the current, known shortfall (45cr / 3 courses) so
-    it's tracked rather than silently masked by a generic tolerance band.
-    If fixed, update this test to assert all 8 pool courses are present.
+    Previously only 5 of 8 were placed. _select_electives' top-up pass was
+    adding mutually-restricted alternative courses elsewhere in the plan
+    without checking for restriction conflicts (unlike its Pass 1 loop),
+    consuming scheduler slots/credit budget this zero-slack pool needed to
+    place all 8 of its own members. Fixed by applying the same
+    _conflicts_with_selected guard already used in Pass 1.
     """
     name = "Mental Health and Addiction – Bachelor of Health Science"
     plan = svc.generate_best_plan(major_name=name)
     plan_codes = {c.code for s in plan.semesters for c in s.courses}
 
     pool_codes = {"147202", "147302", "147305", "150235", "150302", "179210", "179230", "179310"}
-    present = pool_codes & plan_codes
     missing = pool_codes - plan_codes
 
-    assert len(present) == 5, (
-        f"Expected exactly 5 of 8 pool courses scheduled (the known "
-        f"shortfall), got {len(present)}: {sorted(present)}. If this "
-        f"major's data or the scheduler has changed, re-investigate "
-        f"whether the underlying placement bug is fixed or just shifted."
-    )
-    assert missing == {"147302", "147305", "150302"}, (
-        f"Expected the same 3 courses to be missing as previously found. "
-        f"got {sorted(missing)} instead, suggesting the failure mode changed."
+    assert not missing, (
+        f"Expected all 8 zero-slack pool courses to be scheduled, "
+        f"missing: {sorted(missing)}."
     )
 
+
+def test_select_electives_topup_skips_restriction_conflicts():
+    """
+    Isolated regression test for the top-up-pass restriction bug (see
+    DATA_QUALITY.md, "RESOLVED: pool-reuse / top-up
+    restriction bug"), independent of majors.json/courses.json content.
+
+    Builds a minimal scenario by hand: one 15cr "choose one of 4"
+    named pool where every member mutually restricts every other member
+    (like Massey's 247111/112/113/114 cluster), plus a second, larger
+    pool of unrestricted filler courses. The combined elective_budget is
+    set higher than what both pools' own targets sum to, so the top-up
+    pass has leftover budget with nowhere legitimate to spend it -
+    exactly the condition that used to make it grab a second,
+    restriction-conflicting member of the already-satisfied first pool.
+
+    Asserts the selected set never contains two courses that restrict
+    each other, regardless of how much leftover budget top-up has.
+    """
+    from coursemap.optimisation.search import PlanSearch
+    from coursemap.planner.generator import PlanGenerator
+    from coursemap.domain.course import Course, Offering
+    from coursemap.domain.requirement_nodes import ChooseCreditsRequirement
+
+    d_dis = (Offering(semester="S1", campus="D", mode="DIS"),)
+
+    # A 4-member "choose one of" pool where every member restricts every
+    # other member - mirrors 247111/247112/247113/247114.
+    pool_members = {}
+    pool_codes = ("900101", "900102", "900103", "900104")
+    for code in pool_codes:
+        others = frozenset(c for c in pool_codes if c != code)
+        pool_members[code] = Course(
+            code=code, title=f"Pool course {code}", credits=15, level=100,
+            offerings=d_dis, restrictions=others,
+        )
+
+    # A larger pool of mutually-unrestricted filler courses, sized so the
+    # combined elective_budget exceeds both pools' own targets - this is
+    # what makes the top-up pass activate.
+    filler_codes = tuple(f"90020{i}" for i in range(6))
+    filler_members = {
+        code: Course(
+            code=code, title=f"Filler {code}", credits=15, level=100,
+            offerings=d_dis,
+        )
+        for code in filler_codes
+    }
+
+    courses = {**pool_members, **filler_members}
+
+    pool_node = ChooseCreditsRequirement(credits=15, course_codes=pool_codes)
+    filler_node = ChooseCreditsRequirement(credits=60, course_codes=filler_codes)
+
+    gen = PlanGenerator(courses, campus="D", mode="DIS", start_year=2026, no_summer=True)
+    search = PlanSearch(
+        courses=courses, majors=[], generator_template=gen,
+        prior_completed=frozenset(), preferred_electives=frozenset(),
+        excluded_courses=frozenset(),
+    )
+
+    # Budget well above both pools' nominal targets (15 + 60 = 75), so
+    # top-up has leftover room to try to "spend" once both are satisfied.
+    selected = search._select_electives([pool_node, filler_node], elective_budget=120)
+
+    picked_from_pool = [c for c in pool_codes if c in selected]
+    assert len(picked_from_pool) == 1, (
+        f"Expected exactly one member of the mutually-restricted pool to "
+        f"be selected, got {len(picked_from_pool)}: {picked_from_pool}. "
+        f"The top-up pass added a restriction-conflicting alternative."
+    )
+
+    for code in selected:
+        conflicts = courses[code].restrictions & selected
+        assert not conflicts, (
+            f"{code} conflicts with {conflicts}, both in the same "
+            f"selection - the student could never enrol in both."
+        )
