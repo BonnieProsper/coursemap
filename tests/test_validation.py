@@ -79,3 +79,116 @@ def test_degree_validation_fails_on_wrong_total():
     result = validator.validate(plan)
     assert not result.passed
     assert any("below required" in e or "999" in e for e in result.errors)
+
+
+def test_degree_validation_fails_on_restriction_conflict():
+    """
+    DegreeValidator must catch two plan courses that mutually restrict
+    each other, even when every requirement node in the tree is
+    individually satisfied. A plan requiring two courses a student could
+    never actually both be enrolled in isn't a valid plan, regardless of
+    whether the credit/course-presence bookkeeping looks complete.
+
+    Found via a real bug: _select_electives' top-up pass (optimisation/
+    search.py) could add a restriction-conflicting alternative of an
+    already-satisfied pool to spend leftover budget, and nothing in the
+    validation pipeline caught it - the plan "passed" by every check that
+    existed at the time. Extending this test's fixture with a genuine
+    mutual restriction and confirming DegreeValidator now catches it
+    directly (independent of the scheduler bug that originally exposed
+    the gap) is what makes this a real regression test rather than one
+    that only happens to pass because the originating bug got fixed
+    elsewhere.
+    """
+    from coursemap.domain.plan import DegreePlan, SemesterPlan
+
+    courses = _fixture_courses()
+    # Two courses that mutually restrict each other, unrelated to any
+    # prerequisite chain, so this isolates the restriction check itself.
+    courses["MATH101"] = Course(
+        "MATH101", "Calculus I", 15, 100, _offering(["S1", "S2"]),
+        restrictions=frozenset({"MATH102"}),
+    )
+    courses["MATH102"] = Course(
+        "MATH102", "Algebra I", 15, 100, _offering(["S1", "S2"]),
+        restrictions=frozenset({"MATH101"}),
+    )
+
+    plan = DegreePlan(
+        semesters=(
+            SemesterPlan(year=2026, semester="S1", courses=(courses["MATH101"], courses["MATH102"])),
+        ),
+    )
+
+    degree_requirement = requirement_from_dict({
+        "type": "ALL_OF",
+        "children": [{"type": "TOTAL_CREDITS", "required_credits": 30}],
+    })
+
+    validator = DegreeValidator(degree_requirement)
+    result = validator.validate(plan)
+
+    assert not result.passed
+    assert any("MATH101" in e and "MATH102" in e and "restrict" in e for e in result.errors)
+
+
+def test_degree_validation_restriction_conflict_reported_once_per_pair():
+    """A-restricts-B and B-restricts-A (the normal symmetric case) must
+    produce one error, not two, for the same pair."""
+    from coursemap.domain.plan import DegreePlan, SemesterPlan
+
+    courses = _fixture_courses()
+    courses["MATH101"] = Course(
+        "MATH101", "Calculus I", 15, 100, _offering(["S1", "S2"]),
+        restrictions=frozenset({"MATH102"}),
+    )
+    courses["MATH102"] = Course(
+        "MATH102", "Algebra I", 15, 100, _offering(["S1", "S2"]),
+        restrictions=frozenset({"MATH101"}),
+    )
+
+    plan = DegreePlan(
+        semesters=(
+            SemesterPlan(year=2026, semester="S1", courses=(courses["MATH101"], courses["MATH102"])),
+        ),
+    )
+
+    degree_requirement = requirement_from_dict({
+        "type": "ALL_OF",
+        "children": [{"type": "TOTAL_CREDITS", "required_credits": 30}],
+    })
+
+    validator = DegreeValidator(degree_requirement)
+    result = validator.validate(plan)
+
+    conflict_errors = [e for e in result.errors if "restrict" in e]
+    assert len(conflict_errors) == 1, f"Expected exactly 1 conflict error, got {len(conflict_errors)}: {conflict_errors}"
+
+
+def test_degree_validation_no_false_positive_on_unrelated_restrictions():
+    """A course restricting something NOT in the plan must not trigger a
+    false-positive conflict error."""
+    from coursemap.domain.plan import DegreePlan, SemesterPlan
+
+    courses = _fixture_courses()
+    courses["MATH101"] = Course(
+        "MATH101", "Calculus I", 15, 100, _offering(["S1", "S2"]),
+        restrictions=frozenset({"SOME_COURSE_NOT_IN_PLAN"}),
+    )
+
+    plan = DegreePlan(
+        semesters=(
+            SemesterPlan(year=2026, semester="S1", courses=(courses["MATH101"], courses["STAT101"])),
+        ),
+    )
+
+    degree_requirement = requirement_from_dict({
+        "type": "ALL_OF",
+        "children": [{"type": "TOTAL_CREDITS", "required_credits": 30}],
+    })
+
+    validator = DegreeValidator(degree_requirement)
+    result = validator.validate(plan)
+
+    assert result.passed
+    assert not result.errors

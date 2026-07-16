@@ -10,9 +10,10 @@ server restarts, making shared links permanently deterministic: the same
 ?pid=... always returns the same plan.
 
 Public API:
-    plan_store.get(plan_id)     -> dict | None
-    plan_store.put(plan_id, d)  -> None
-    plan_store.count()          -> int
+    plan_store.get(plan_id)              -> dict | None
+    plan_store.get_with_params(plan_id)  -> (params dict, result dict) | None
+    plan_store.put(plan_id, params, d)   -> None
+    plan_store.count()                   -> int
 """
 from __future__ import annotations
 
@@ -117,6 +118,32 @@ class _PlanStore:
                 pass
             return json.loads(row[0])
 
+    def get_with_params(self, plan_id: str) -> tuple[dict, dict] | None:
+        """
+        Return (params, result) for a stored plan, or None if not found.
+
+        Used to re-validate a stored plan against current data on read and,
+        if it's found to be stale (see server.py's _get_plan_or_heal),
+        regenerate it from the exact original request parameters rather
+        than needing the caller to already know them.
+        """
+        with self._lock, self._connection() as conn:
+            row = conn.execute(
+                "SELECT params_json, result_json FROM plans WHERE plan_id = ?",
+                (plan_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            try:
+                conn.execute(
+                    "UPDATE plans SET hit_count = hit_count + 1, last_hit = datetime('now') WHERE plan_id = ?",
+                    (plan_id,),
+                )
+                conn.commit()
+            except Exception:
+                pass
+            return json.loads(row[0]), json.loads(row[1])
+
     def put(self, plan_id: str, params: dict, result: dict) -> None:
         """Insert or replace a plan. Prunes oldest plans if over the cap."""
         with self._lock, self._connection() as conn:
@@ -180,6 +207,11 @@ import asyncio as _asyncio
 async def async_get(plan_id: str) -> dict | None:
     """Non-blocking wrapper around plan_store.get()."""
     return await _asyncio.to_thread(plan_store.get, plan_id)
+
+
+async def async_get_with_params(plan_id: str) -> tuple[dict, dict] | None:
+    """Non-blocking wrapper around plan_store.get_with_params()."""
+    return await _asyncio.to_thread(plan_store.get_with_params, plan_id)
 
 
 async def async_put(plan_id: str, params: dict, result: dict) -> None:

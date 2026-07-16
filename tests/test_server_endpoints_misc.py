@@ -498,10 +498,6 @@ def test_plan_has_plan_id_field():
     assert len(res.json()["plan_id"]) > 0
 
 
-# ═══════════════════════════════════════════════════════════════
-# Tests added in continuation session
-# ═══════════════════════════════════════════════════════════════
-
 # ── Minor dataset expansion ───────────────────────────────────────────────────
 
 def test_minors_dataset_has_more_than_eight():
@@ -1198,7 +1194,7 @@ def test_progress_small_remaining_gives_at_least_one():
 
 
 # ═══════════════════════════════════════════════════════════════
-# Session 6: prerequisite.py, minor_loader, CLI minors
+# prerequisite.py, minor_loader, CLI minors
 # ═══════════════════════════════════════════════════════════════
 
 # ── OrExpression.required_courses() returns union (all branches) ─────────────
@@ -1345,7 +1341,7 @@ def test_plan_with_or_prereqs_doesnt_overcrowd():
 
 
 # ═══════════════════════════════════════════════════════════════
-# Session 7: scorer, validator, CLI, HTML export
+# scorer, validator, CLI, HTML export
 # ═══════════════════════════════════════════════════════════════
 
 # ── PlanScorer S1/S2 balance ──────────────────────────────────────────────────
@@ -1502,11 +1498,6 @@ def test_scorer_fewer_semesters_wins():
     ))
     scorer = PlanScorer()
     assert scorer.score(short) < scorer.score(long_)
-
-
-# ═══════════════════════════════════════════════════════════════
-# Session 8: fees.py, select_free_electives, CLI defaults
-# ═══════════════════════════════════════════════════════════════
 
 # ── fees.py: no duplicate keys ────────────────────────────────────────────────
 
@@ -1716,11 +1707,6 @@ def test_estimate_plan_fees_total_matches_sum_of_by_year():
         f"since a student will naturally add up the per-year breakdown "
         f"themselves and compare it to the displayed total."
     )
-
-
-# ═══════════════════════════════════════════════════════════════
-# Session 9: requirement_nodes, plan.py, select_free_electives
-# ═══════════════════════════════════════════════════════════════
 
 # ── MinLevelCreditsRequirement includes prior_completed ───────────────────────
 
@@ -1935,10 +1921,6 @@ def test_requirement_roundtrip_nested():
     assert len(restored.children) == 2
 
 
-# ═══════════════════════════════════════════════════════════════
-# Session 10: dataset_validator, CLI JSON export, OR cycle fix
-# ═══════════════════════════════════════════════════════════════
-
 # ── dataset_validator: OR-aware cycle detection ───────────────────────────────
 
 def test_prereq_hard_codes_or_returns_intersection():
@@ -2094,10 +2076,6 @@ def test_prereq_hard_codes_excludes_unknown():
     result = _prereq_hard_codes(CoursePrerequisite("UNKNOWN999"), {"A", "B"})
     assert result == set()
 
-
-# ═══════════════════════════════════════════════════════════════
-# Session 11: ical.py, CLI courses --semester, data-quality fix
-# ═══════════════════════════════════════════════════════════════
 
 # ── iCal UID sanitisation ─────────────────────────────────────────────────────
 
@@ -2282,10 +2260,6 @@ def test_freshness_report_is_not_stale_for_current_dataset():
     assert not report["is_stale"], \
         f"Dataset unexpectedly stale: {report['message']}"
 
-
-# ═══════════════════════════════════════════════════════════════
-# Session 12: requirement_serialization, select_free_electives
-# ═══════════════════════════════════════════════════════════════
 
 # ── requirement_from_dict: empty children guard ───────────────────────────────
 
@@ -2485,10 +2459,6 @@ def test_collect_course_codes_excludes_total_credits_node():
     assert "360" not in codes
 
 
-# ═══════════════════════════════════════════════════════════════
-# Session 13: planner_service no_summer defaults, ecology fix
-# ═══════════════════════════════════════════════════════════════
-
 # ── planner_service: no_summer=True defaults ─────────────────────────────────
 
 def test_generate_best_plan_default_no_summer():
@@ -2652,10 +2622,6 @@ def test_required_course_codes_excludes_pool_codes():
             f"Pool-only codes incorrectly in required_course_codes: {pool_in_required}"
 
 
-# ═══════════════════════════════════════════════════════════════
-# Session 14: search.py elective_sort_key, module imports
-# ═══════════════════════════════════════════════════════════════
-
 # ── _elective_sort_key uses campus/mode-filtered offerings ───────────────────
 
 def test_elective_sort_key_uses_campus_mode():
@@ -2792,10 +2758,6 @@ def test_plan_all_scheduled_courses_have_valid_offering():
                 has_dist = any(o.campus == "D" and o.mode == "DIS" for o in course.offerings)
                 assert has_dist, f"{c['code']} has no D/DIS offering but was scheduled"
 
-
-# ═══════════════════════════════════════════════════════════════
-# Session 15: API coverage, data quality, code correctness
-# ═══════════════════════════════════════════════════════════════
 
 # ── Untested API endpoints ────────────────────────────────────────────────────
 
@@ -3047,10 +3009,6 @@ def test_all_source_files_have_future_annotations():
     assert not missing, f"Files missing __future__ annotations: {missing}"
 
 
-# ═══════════════════════════════════════════════════════════════
-# Session 16: exception handler, gap display, pyproject
-# ═══════════════════════════════════════════════════════════════
-
 # ── Global exception handler ──────────────────────────────────────────────────
 
 def test_exception_handler_returns_json_not_traceback():
@@ -3174,10 +3132,6 @@ def test_refresh_script_mentions_hot_reload():
     assert "/api/reload" in script, "refresh script should mention /api/reload hot-reload option"
 
 
-# ═══════════════════════════════════════════════════════════════
-# Session 17: _plan_to_out refactor. Pin the extracted helpers
-# ═══════════════════════════════════════════════════════════════
-
 def test_build_gap_meta_returns_expected_keys():
     """_build_gap_meta must return degree_total, raw_gap, residual_gap, gap_explanation."""
     from coursemap.api.server import _build_gap_meta, _svc, PlanRequest
@@ -3283,7 +3237,7 @@ def test_plan_to_out_end_to_end_unchanged():
 
 
 # ═══════════════════════════════════════════════════════════════
-# Session 18: plan cache versioning. Fixes a real stale-cache bug
+# Plan cache versioning. Fixes a real stale-cache bug
 # ═══════════════════════════════════════════════════════════════
 #
 # Found while pinning the _plan_to_out refactor: /api/plan had a hand-rolled
@@ -3456,3 +3410,80 @@ def test_valid_major_still_works_after_blank_validation_added():
         "no_summer": True,
     })
     assert res.status_code == 200
+
+
+def test_stale_shared_plan_self_heals_on_read():
+    """
+    End-to-end test for _get_plan_or_heal: a shared-link plan that becomes
+    stale (here, simulated by directly overwriting a valid stored plan
+    with one containing two mutually-restricting courses, since that's
+    exactly what an old plan generated before the top-up-restriction fix
+    would have looked like) must not be served as-is on GET
+    /api/plan/{plan_id}. It must instead be transparently regenerated and
+    the store healed in place under the same plan_id, since a shared link
+    is meant to be a permalink to a real plan, not a permalink to whatever
+    was true (or buggy) at generation time.
+    """
+    # Generate a real, valid, currently-passing plan to get a real plan_id
+    # and real original params to regenerate from.
+    gen_res = client.post("/api/plan", json={
+        "major": "Computer Science – Bachelor of Science",
+        "auto_fill": True,
+        "no_summer": True,
+    })
+    assert gen_res.status_code == 200
+    plan_id = gen_res.json()["plan_id"]
+
+    # Confirm the two courses used below actually do mutually restrict
+    # each other in the real dataset, so this test fails loudly instead
+    # of silently passing for the wrong reason if the data ever changes.
+    from coursemap.ingestion.dataset_loader import load_courses
+    courses = load_courses()
+    assert "160105" in courses["160101"].restrictions or "160101" in courses["160105"].restrictions, (
+        "160101/160105 no longer restrict each other in the dataset - "
+        "update this test to use a still-conflicting pair."
+    )
+
+    # Directly corrupt the stored plan: inject both conflicting courses
+    # into the first semester, simulating a plan generated before the fix.
+    from coursemap.api.plan_store import plan_store
+    params, result = plan_store.get_with_params(plan_id)
+    result["semesters"][0]["courses"].append({"code": "160101", "title": "Calculus", "credits": 15})
+    result["semesters"][0]["courses"].append({"code": "160105", "title": "Methods of Mathematics", "credits": 15})
+    plan_store.put(plan_id, params, result)
+
+    # Reading it back must NOT return the corrupted snapshot as-is.
+    read_res = client.get(f"/api/plan/{plan_id}")
+    assert read_res.status_code == 200, (
+        f"Expected the plan to self-heal via regeneration, got {read_res.status_code}: {read_res.text}"
+    )
+    healed_codes = {c["code"] for s in read_res.json()["semesters"] for c in s["courses"]}
+    assert not ({"160101", "160105"} <= healed_codes), (
+        "Both conflicting courses are still present - the stored plan was not healed."
+    )
+
+    # The store itself must now hold the healed version too, not just the
+    # single response - a second read must stay healed without needing
+    # to re-trigger regeneration.
+    refetch = client.get(f"/api/plan/{plan_id}")
+    assert refetch.status_code == 200
+    refetch_codes = {c["code"] for s in refetch.json()["semesters"] for c in s["courses"]}
+    assert not ({"160101", "160105"} <= refetch_codes)
+
+
+def test_healthy_stored_plan_unaffected_by_healing_check():
+    """A plan with no restriction conflicts must be returned exactly as
+    stored, not regenerated needlessly on every read."""
+    gen_res = client.post("/api/plan", json={
+        "major": "Computer Science – Bachelor of Science",
+        "auto_fill": True,
+        "no_summer": True,
+    })
+    assert gen_res.status_code == 200
+    plan_id = gen_res.json()["plan_id"]
+    original_codes = {c["code"] for s in gen_res.json()["semesters"] for c in s["courses"]}
+
+    read_res = client.get(f"/api/plan/{plan_id}")
+    assert read_res.status_code == 200
+    read_codes = {c["code"] for s in read_res.json()["semesters"] for c in s["courses"]}
+    assert read_codes == original_codes

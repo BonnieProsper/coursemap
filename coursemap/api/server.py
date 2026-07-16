@@ -45,7 +45,7 @@ _UI_HTML = (Path(__file__).parent / "ui.html").read_text(encoding="utf-8")
 
 
 # Bump when planner logic changes in a way that makes cached plans stale
-_CACHE_VERSION = "v7.1"
+_CACHE_VERSION = "v7.3"
 
 
 def _plan_cache_key(req: "PlanRequest") -> str:
@@ -512,6 +512,75 @@ def _execute_plan(req: PlanRequest, svc: PlannerService):
 
     plan = svc.generate_best_plan(major_name=req.major, **common)
     return plan, [], None
+
+
+def _get_plan_or_heal(plan_id: str, svc: PlannerService) -> dict | None:
+    """
+    Return a stored plan's result dict, re-validated against current data.
+
+    A plan_id is a permalink by design (see plan_store.py) - the same ID
+    should keep working indefinitely. But "permalink" should mean
+    "stable as long as it's still a real plan", not "keeps serving
+    something a student could never actually enrol in, forever". This
+    runs the same restriction-conflict check DegreeValidator uses
+    (imported directly, not duplicated, so the two can't drift) against
+    the stored plan's actual courses under the CURRENT catalogue - cheap,
+    no requirement-tree needed, no risk of a parallel reconstruction path
+    diverging from the real generation logic.
+
+    If that check is clean, returns the stored result unchanged - the
+    common case, no slower than a plain plan_store.get(). Only on an
+    actual conflict does this fall back to a full regeneration through
+    _execute_plan (the exact same path a fresh POST /api/plan request
+    uses), and overwrite the stored entry under the same plan_id so the
+    link is fixed going forward rather than re-triggering a regeneration
+    on every subsequent read.
+
+    Returns None if plan_id doesn't exist at all (caller raises 404).
+    Raises HTTPException(409) if the stored plan is stale AND a fresh
+    regeneration under current data also fails outright (the major's
+    data genuinely can't produce any valid plan right now) - surfacing
+    that clearly beats silently serving the known-broken stored plan.
+    """
+    from coursemap.validation.engine import _check_restriction_conflicts
+
+    stored = plan_store.get_with_params(plan_id)
+    if stored is None:
+        return None
+    params, result = stored
+
+    courses = svc.courses
+    plan_course_codes = {
+        c.get("code", "")
+        for sem in result.get("semesters", [])
+        for c in sem.get("courses", [])
+    }
+    plan_courses = [courses[code] for code in plan_course_codes if code in courses]
+
+    conflict_errors: list[str] = []
+    _check_restriction_conflicts(plan_courses, conflict_errors)
+    if not conflict_errors:
+        return result
+
+    logger.warning(
+        "Stored plan %s failed re-validation on read (%s); regenerating.",
+        plan_id, "; ".join(conflict_errors),
+    )
+    try:
+        req = PlanRequest(**params)
+        plan, filler, double_info = _execute_plan(req, svc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This plan is out of date and could not be automatically "
+                f"repaired: {exc}. Please generate a new plan."
+            ),
+        )
+
+    fresh = _plan_to_out(plan, svc, req, filler_codes=filler, double_info=double_info, plan_id=plan_id)
+    plan_store.put(plan_id, params, fresh.model_dump())
+    return fresh.model_dump()
 
 
 
@@ -1165,8 +1234,13 @@ def get_plan(plan_id: str):
     plan_id values are returned in POST /api/plan responses and encoded in share links.
     Plans are held in memory. They survive server restarts only if the same parameters
     are re-submitted (which will regenerate and re-cache the same plan).
+
+    Re-validated on every read against current data (see _get_plan_or_heal) - a
+    stale plan generated before a correctness fix self-heals rather than staying
+    broken at this URL forever.
     """
-    cached = plan_store.get(plan_id)
+    svc = _svc()
+    cached = _get_plan_or_heal(plan_id, svc)
     if cached is None:
         raise HTTPException(
             status_code=404,
@@ -1372,7 +1446,8 @@ def estimate_fees_for_plan(req: FeesRequest):
     from coursemap.domain.fees import estimate_plan_fees
 
     if req.plan_id:
-        cached = plan_store.get(req.plan_id)
+        svc = _svc()
+        cached = _get_plan_or_heal(req.plan_id, svc)
         if not cached:
             raise HTTPException(
                 status_code=404,
@@ -1731,7 +1806,7 @@ def validate_plan(req: ValidateRequest):
 
     # Resolve which course codes to validate
     if req.plan_id:
-        cached = plan_store.get(req.plan_id)
+        cached = _get_plan_or_heal(req.plan_id, svc)
         if not cached:
             raise HTTPException(
                 status_code=404,
@@ -1803,7 +1878,8 @@ def advisor_summary(plan_id: str):
     Return a formatted plain-text summary of a stored plan suitable for
     printing or emailing to an academic advisor.
     """
-    cached = plan_store.get(plan_id)
+    svc = _svc()
+    cached = _get_plan_or_heal(plan_id, svc)
     if not cached:
         raise HTTPException(status_code=404, detail="Plan not found.")
     text = _PlanExportSvc.to_advisor_text(cached, plan_id=plan_id)
@@ -1816,7 +1892,8 @@ def advisor_summary(plan_id: str):
          summary="Markdown export of a stored plan")
 def plan_markdown(plan_id: str):
     """Return a Markdown-formatted plan, useful for pasting into Notion, Obsidian, etc."""
-    cached = plan_store.get(plan_id)
+    svc = _svc()
+    cached = _get_plan_or_heal(plan_id, svc)
     if not cached:
         raise HTTPException(status_code=404, detail="Plan not found.")
     text = _PlanExportSvc.to_markdown(cached)

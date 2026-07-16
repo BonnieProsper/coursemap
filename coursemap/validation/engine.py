@@ -88,7 +88,38 @@ class DegreeValidator:
         credits_by_code = {c.code: c.credits for c in all_plan_courses}
         claimed = _collect_claimed_codes(self.requirement, plan_codes, credits_by_code)
         _check(self.requirement, plan, errors, claimed)
+        _check_restriction_conflicts(all_plan_courses, errors)
         return ValidationResult(passed=not errors, errors=errors)
+
+
+def _check_restriction_conflicts(all_plan_courses: list, errors: list[str]) -> None:
+    """
+    Flag any two courses in the plan that mutually restrict each other -
+    i.e. Massey's rules mean a student could never actually be enrolled in
+    both at once, so a plan requiring both isn't a plan a student could
+    ever submit, regardless of whether every individual requirement node
+    in the tree is otherwise satisfied.
+
+    Each conflicting pair is reported once (by iterating only forward
+    through the list and comparing each course against those after it),
+    not twice for A-restricts-B and B-restricts-A.
+    """
+    plan_codes = {c.code for c in all_plan_courses}
+    seen_pairs: set[frozenset[str]] = set()
+    for i, course in enumerate(all_plan_courses):
+        if not course.restrictions:
+            continue
+        conflicting = course.restrictions & plan_codes
+        for other_code in conflicting:
+            pair = frozenset((course.code, other_code))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            errors.append(
+                f"{course.code} and {other_code} are both in the plan but "
+                f"restrict each other - a student cannot be enrolled in "
+                f"both at the same time."
+            )
 
 
 def _check(
