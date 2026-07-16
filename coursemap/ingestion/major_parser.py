@@ -23,6 +23,23 @@ COURSE_URL_RE = re.compile(r'/study/courses/(\d{6})/', re.IGNORECASE)
 CREDITS_RE = re.compile(r'(?:choose\s+)?(\d+)\s*credits?', re.IGNORECASE)
 # Strips "Course code:" prefix that appears in .course-schedules__summary-code text.
 _CODE_PREFIX_RE = re.compile(r'^[Cc]ourse\s+[Cc]ode:\s*', re.IGNORECASE)
+# A bare 6-digit course code in plain prose text (as opposed to COURSE_URL_RE,
+# which matches inside a URL path). Used to pull codes out of a "Planning
+# information" bullet's own wording, not its links, since a choice clause's
+# codes appear as visible text right after the trigger phrase (see
+# _PLANNING_CHOICE_RE below) and the bullet's <a> tags don't distinguish
+# "part of the choice" from "mentioned afterward as an aside".
+_COURSE_CODE_TEXT_RE = re.compile(r'\b\d{6}\b')
+# Live-verified phrasing (course "Computer Science - Bachelor of Information
+# Sciences") for a choice expressed in a Planning information bullet's prose,
+# rather than Massey's structured .course-schedules "Choose N credits" widget
+# handled by Step 2 below: "one or more of 160105, 160101, 160102" and
+# "one of 161111 or 297101". Same restrained scope as the "one of"/"any of"
+# regex in prerequisite_scraper.py and for the same reason: only rewrite
+# phrasing actually observed on a live page, not phrasing guessed at.
+_PLANNING_CHOICE_RE = re.compile(
+    r'\b(?:one or more of|at least one of|one of|any of)\b', re.IGNORECASE,
+)
 
 
 def _clean_code(raw: str) -> str:
@@ -80,6 +97,37 @@ def parse_major_page(html: str) -> dict[str, Any]:
             # Skip items inside .course-schedules (elective pool entries)
             if li.find_parent(class_='course-schedules'):
                 continue
+
+            li_text = li.get_text(' ', strip=True)
+            choice_match = _PLANNING_CHOICE_RE.search(li_text)
+            if choice_match:
+                # Only the codes in the same sentence as the trigger phrase
+                # are part of the choice. A bullet can go on to mention
+                # another code afterward as a mere aside (live example:
+                # "one or more of 160105, 160101, 160102. Note: you can
+                # also take 160104 as an elective in your degree") -
+                # 160104 must NOT be pulled into the requirement just for
+                # being linked in the same <li>.
+                period_pos = li_text.find('.', choice_match.end())
+                span_end = period_pos if period_pos != -1 else len(li_text)
+                span_text = li_text[choice_match.end():span_end]
+                choice_codes = _COURSE_CODE_TEXT_RE.findall(span_text)
+                if choice_codes:
+                    elective_children.append({
+                        'type': 'CHOOSE_CREDITS',
+                        # No credit figure is ever stated for this prose
+                        # form (unlike .course-schedules' explicit "Choose
+                        # N credits" header, handled in Step 2 below) - 15
+                        # is the credit value of every course observed
+                        # anywhere in this codebase's data, not a
+                        # page-stated fact for this specific pool. Flagged
+                        # in DATA_QUALITY.md for spot-verification once
+                        # pools like this exist in a fresh scrape.
+                        'credits': 15,
+                        'course_codes': choice_codes,
+                    })
+                    continue
+
             a = li.find('a', href=COURSE_URL_RE)
             if a:
                 m = COURSE_URL_RE.search(a.get('href', ''))
