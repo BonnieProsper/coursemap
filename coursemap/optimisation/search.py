@@ -53,7 +53,7 @@ from coursemap.domain.prerequisite import (
     AndExpression as _AndExpression,
     OrExpression as _OrExpression,
 )
-from coursemap.domain.prerequisite_utils import prereqs_met
+from coursemap.domain.prerequisite_utils import prereqs_met, would_restriction_conflict
 from coursemap.planner.generator import PlanGenerator, _LEVEL_PROGRESSION_GATE
 from coursemap.optimisation.scorer import PlanScorer
 from coursemap.validation.engine import DegreeValidator
@@ -583,7 +583,8 @@ class PlanSearch:
         # picks a fresh, different (and possibly mutually-restricted)
         # variant to fill what it wrongly still thinks is an unmet target.
         elective_codes = self._select_electives(
-            pure_elective_nodes, elective_budget, always_include_in_pool
+            pure_elective_nodes, elective_budget, always_include_in_pool,
+            also_avoid_conflicts_with=required_codes,
         )
         # Merge always_include_in_pool into elective_codes; they are required
         # but treated as electives by the working set builder.
@@ -1062,6 +1063,7 @@ class PlanSearch:
         elective_nodes: list[ChooseCreditsRequirement],
         elective_budget: int = 0,
         always_include: set[str] | None = None,
+        also_avoid_conflicts_with: frozenset[str] = frozenset(),
     ) -> set[str]:
         """
         Choose courses from elective pools using a greedy, delivery-mode-aware strategy.
@@ -1075,6 +1077,11 @@ class PlanSearch:
 
         always_include: codes that appear as COURSE nodes AND pool members; always
         scheduled regardless of budget since the validation tree requires them directly.
+
+        also_avoid_conflicts_with: codes required outside this pool selection
+        entirely (e.g. required_codes, or the other major's required_codes in
+        a double major) that pool candidates must not restriction-conflict
+        with. Not scheduled or credited here - only used for conflict checks.
 
         For pools with credits > 0: select the minimum schedulable courses meeting the
         credit target, preferring always_include codes then elective_sort_key order.
@@ -1126,30 +1133,19 @@ class PlanSearch:
                 0 if is_schedulable(code) else 1,
             ) + self._elective_sort_key(code)
 
-        def _conflicts_with_selected(code: str) -> bool:
+        def _would_force_conflict(code: str) -> bool:
             """
-            True if `code` would trip a mutual restriction against anything
-            already in `selected` (from this pool, an earlier pool in this
-            same call, or always_include). Checked both directions since
-            scraped restriction data isn't guaranteed to list a pair from
-            both sides. Without this, two named-pool selections that
-            restrict each other (e.g. two intro-stats variants a double
-            major's separate majors each nominally require) both get
-            selected, and the scheduler correctly rejects the whole plan
-            later instead of this function just picking a different pool
-            member. Same fix, same reasoning, as ElectiveFiller's
-            restriction-awareness, see DATA_QUALITY.md.
+            True if selecting `code` would restriction-conflict, directly or
+            via its forced prerequisite closure, with anything already
+            selected in this call or in `also_avoid_conflicts_with`
+            (required outside this pool selection - e.g. the other major's
+            hard-required courses in a double major). See
+            prerequisite_utils.would_restriction_conflict for the shared
+            logic (also used by ElectiveFiller).
             """
-            course = self.courses.get(code)
-            if course is None:
-                return False
-            if course.restrictions & selected:
-                return True
-            for other in selected:
-                other_course = self.courses.get(other)
-                if other_course and code in other_course.restrictions:
-                    return True
-            return False
+            locked = selected | also_avoid_conflicts_with
+            context = locked | always_include | frozenset(self.prior_completed)
+            return would_restriction_conflict(code, locked, self.courses, context)
 
         # ----------------------------------------------------------------
         # Pass 1: pools with known credit targets.
@@ -1239,7 +1235,7 @@ class PlanSearch:
                     course = self.courses.get(code)
                     if course is None:
                         continue
-                    if _conflicts_with_selected(code):
+                    if _would_force_conflict(code):
                         continue
                     selected.add(code)
                     if is_schedulable(code):
@@ -1300,7 +1296,7 @@ class PlanSearch:
                         # Pass 1's identical guard above). Adding one here
                         # would make the plan unschedulable, since the
                         # student can never actually enrol in both.
-                        if _conflicts_with_selected(code):
+                        if _would_force_conflict(code):
                             continue
                         selected.add(code)
                         remaining -= course.credits

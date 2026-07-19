@@ -2131,3 +2131,63 @@ def test_select_electives_topup_skips_restriction_conflicts():
             f"{code} conflicts with {conflicts}, both in the same "
             f"selection - the student could never enrol in both."
         )
+
+
+def test_select_electives_skips_course_whose_forced_prereq_conflicts():
+    """
+    Isolated regression test for the transitive-prerequisite restriction
+    bug: a pool course with no restriction of its own can still force a
+    conflict, because taking it later pulls in a hard (non-OR) prerequisite
+    that restricts something an earlier pool already selected.
+
+    Mirrors the real case (159261 "Games Programming", bare-required
+    159101; 159101 restricts 159100; an earlier "compulsory first-year"
+    pool had already picked 159100). Built by hand so it doesn't depend
+    on courses.json content.
+
+    Pool A: choose one of two mutually-restricted intro variants, 100/101.
+    Pool B: needs 15cr; contains 200 (bare-requires 101 - conflicts once
+    100 is picked) and 201 (no prerequisite at all - always safe). Both
+    are otherwise equally good candidates, so nothing except the forced-
+    conflict check would prefer 201 over 200.
+    """
+    from coursemap.optimisation.search import PlanSearch
+    from coursemap.planner.generator import PlanGenerator
+    from coursemap.domain.course import Course, Offering
+    from coursemap.domain.requirement_nodes import ChooseCreditsRequirement
+    from coursemap.domain.prerequisite import CoursePrerequisite
+
+    d_dis = (Offering(semester="S1", campus="D", mode="DIS"),)
+
+    intro_100 = Course(code="100", title="Intro A", credits=15, level=100,
+                        offerings=d_dis, restrictions=frozenset({"101"}))
+    intro_101 = Course(code="101", title="Intro B", credits=15, level=100,
+                        offerings=d_dis, restrictions=frozenset({"100"}))
+    forces_101 = Course(code="200", title="Needs Intro B", credits=15, level=200,
+                         offerings=d_dis,
+                         prerequisites=CoursePrerequisite(code="101"))
+    safe_alt = Course(code="201", title="No prerequisite", credits=15, level=200,
+                       offerings=d_dis)
+
+    courses = {"100": intro_100, "101": intro_101, "200": forces_101, "201": safe_alt}
+
+    intro_pool = ChooseCreditsRequirement(credits=15, course_codes=("100", "101"))
+    second_pool = ChooseCreditsRequirement(credits=15, course_codes=("200", "201"))
+
+    gen = PlanGenerator(courses, campus="D", mode="DIS", start_year=2026, no_summer=True)
+    search = PlanSearch(
+        courses=courses, majors=[], generator_template=gen,
+        prior_completed=frozenset(), preferred_electives=frozenset(),
+        excluded_courses=frozenset(),
+    )
+
+    # Pools are processed in list order, so the intro pool is resolved
+    # first, then the second pool sees "100" already selected.
+    selected = search._select_electives([intro_pool, second_pool], elective_budget=30)
+
+    assert "200" not in selected, (
+        "200 was selected despite its bare prerequisite (101) restricting "
+        "100, which the intro pool already picked - 201 was available as "
+        "a conflict-free alternative and should have been preferred."
+    )
+    assert "201" in selected

@@ -51,3 +51,97 @@ def prereqs_met(
     # when only some OR branches are satisfied via out-of-scope codes.
     # This fallback only fires for unknown subclasses; in practice it is dead code.
     return prereq.is_satisfied(completed | (prereq.required_courses() - known))
+
+
+def forced_prereq_closure(
+    code: str,
+    context: set[str],
+    courses: dict,
+) -> frozenset[str]:
+    """
+    Course codes that would end up in the working set purely because
+    `code` has no way around needing them: a plain prerequisite, or an AND
+    branch, with no OR alternative already satisfied by `context`.
+
+    `context` is the set of codes to treat as already available (selected
+    so far, prior completions, anything else already locked in) - an OR
+    branch already in context needs no further expansion, since it's free.
+
+    Used to catch conflicts one level removed from a candidate's own
+    restrictions field: a course can have no restriction of its own and
+    still force a restricted course in later via its prerequisite chain.
+    """
+    result: set[str] = set()
+    visited: set[str] = {code}
+
+    def _walk(node) -> None:
+        if node is None:
+            return
+        if isinstance(node, CoursePrerequisite):
+            child = node.code
+            if child in context or child in result or child in visited or child not in courses:
+                return
+            result.add(child)
+            visited.add(child)
+            _walk(courses[child].prerequisites)
+        elif isinstance(node, AndExpression):
+            for c in node.children:
+                _walk(c)
+        elif isinstance(node, OrExpression):
+            for c in node.children:
+                if isinstance(c, CoursePrerequisite) and c.code in context:
+                    return  # already satisfied, nothing forced
+            best = min(
+                node.children,
+                key=lambda c: courses[c.code].level if isinstance(c, CoursePrerequisite) and c.code in courses else 999,
+            )
+            _walk(best)
+
+    if code in courses:
+        _walk(courses[code].prerequisites)
+    return frozenset(result)
+
+
+def would_restriction_conflict(
+    code: str,
+    locked_codes: set[str],
+    courses: dict,
+    context: set[str] | None = None,
+) -> bool:
+    """
+    True if adding `code` would conflict, directly or transitively, with
+    anything in `locked_codes` (already-selected or otherwise-committed
+    course codes it must not restriction-conflict with).
+
+    Checks `code`'s own restrictions field against `locked_codes` both
+    ways (scraped restriction data isn't guaranteed to list a pair from
+    both sides), then does the same for every course in `code`'s forced
+    prerequisite closure (see forced_prereq_closure) - a course can force
+    a restricted course in via its prerequisite chain without carrying
+    any restriction of its own.
+
+    `context` defaults to locked_codes; pass a wider set (e.g. including
+    prior-completed courses) if the caller has one available.
+    """
+    course = courses.get(code)
+    if course is None:
+        return False
+    if course.restrictions & locked_codes:
+        return True
+    for other in locked_codes:
+        other_course = courses.get(other)
+        if other_course and code in other_course.restrictions:
+            return True
+
+    closure_context = context if context is not None else locked_codes
+    for forced in forced_prereq_closure(code, closure_context, courses):
+        forced_course = courses.get(forced)
+        if forced_course is None:
+            continue
+        if forced_course.restrictions & locked_codes:
+            return True
+        for other in locked_codes:
+            other_course = courses.get(other)
+            if other_course and forced in other_course.restrictions:
+                return True
+    return False
