@@ -1110,6 +1110,26 @@ def test_double_major_shared_codes_info(svc):
     assert "161111" in info["shared_codes"]
 
 
+def test_double_major_shared_codes_are_actually_scheduled(svc):
+    """
+    Every code reported as "shared" must actually be in the generated plan,
+    not just a code that appears somewhere in both majors' requirement
+    trees. CS and Mathematics both reference the same choose-one-of-4
+    247111/247112/247113/247114 graduate-profile pool; only one of the four
+    is ever actually scheduled, but shared_codes was computed from the full
+    requirement trees (collect_course_codes, which lists every pool member)
+    intersected with each other, not with the plan - so all 4 got reported
+    as shared even though 3 of them are never in any real plan.
+    """
+    plan, info = svc.generate_double_major_plan(
+        "Computer Science – Bachelor of Science",
+        "Mathematics – Bachelor of Science",
+    )
+    planned_codes = {c.code for s in plan.semesters for c in s.courses}
+    missing = set(info["shared_codes"]) - planned_codes
+    assert not missing, f"Reported as shared but not in the plan: {missing}"
+
+
 def test_double_major_prereq_order_preserved(svc):
     """No prerequisite ordering violations in a double-major plan."""
     plan, _ = svc.generate_double_major_plan(

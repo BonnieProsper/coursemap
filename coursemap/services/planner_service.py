@@ -639,7 +639,19 @@ class PlannerService:
         # Build info dict.
         first_codes  = collect_course_codes(first_req)
         second_codes = collect_course_codes(second_req)
-        shared_codes = first_codes & second_codes
+        # first_codes/second_codes list every code EITHER major's tree could
+        # possibly draw from, including every member of a CHOOSE_CREDITS
+        # pool - not just what actually got selected. Two majors that both
+        # reference the same "choose one of 247111/112/113/114" pool would
+        # otherwise get all 4 variants reported as shared, even though only
+        # one is ever actually scheduled in a real plan (test that caught
+        # this: TestDoubleMajorHighlighting::test_shared_codes_are_in_plan).
+        # Restricting to codes actually present in the generated plan makes
+        # "shared" mean "this specific scheduled course counts toward both
+        # majors' requirements," which is what the credit-saving figures
+        # below are meant to represent.
+        actually_scheduled = {c.code for sem in plan.semesters for c in sem.courses}
+        shared_codes = (first_codes & second_codes) & actually_scheduled
 
         saved_credits = sum(
             self.courses[c].credits for c in shared_codes if c in self.courses
