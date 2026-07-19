@@ -33,6 +33,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from coursemap.domain.course import Course
+from coursemap.domain.prerequisite_utils import would_restriction_conflict
 
 logger = logging.getLogger(__name__)
 
@@ -234,21 +235,6 @@ class ElectiveFiller:
             exclude=already_in_plan,
         )
 
-        # Restrictions cut both ways and the scraped data isn't guaranteed to
-        # list a pair from both sides (Massey's own pages don't always list
-        # the reverse direction either), so precompute what's restricted BY
-        # anything already in the plan, not just what each already-planned
-        # course's own restrictions field says. Without this, a candidate
-        # like 159100 (restricted against 159101) gets recommended as filler
-        # even when 159101 is already a required course elsewhere in the
-        # same plan, and the generator correctly rejects the whole plan
-        # afterward instead of the filler just picking something else.
-        restricted_by_existing: set[str] = set()
-        for code in already_in_plan:
-            existing = self.courses.get(code)
-            if existing:
-                restricted_by_existing |= existing.restrictions
-
         candidates: list[FillerCandidate] = []
 
         for code, course in self.courses.items():
@@ -262,9 +248,7 @@ class ElectiveFiller:
                 continue
             if not self._prereqs_satisfiable(course, completed | set(seed_codes)):
                 continue
-            if course.restrictions & already_in_plan:
-                continue
-            if code in restricted_by_existing:
+            if would_restriction_conflict(code, already_in_plan, self.courses):
                 continue
 
             prefix = self._prefix(code)
@@ -386,13 +370,7 @@ class ElectiveFiller:
         level_floor_priority = level_floor_priority or {}
         level_running: dict[int, int] = {}
         floor_running: dict[int, int] = {}
-        # rank_candidates already excludes anything restricted against what
-        # was already in the plan BEFORE this call started. This tracks
-        # restrictions introduced by selections made DURING this call, since
-        # the ranked list is built once upfront: two candidates that
-        # restrict each other could otherwise both pass the initial ranking
-        # and both get selected in the same batch.
-        restricted_by_selected: set[str] = set()
+        already_in_plan = set(seed_codes) | set(completed) | exclude
 
         selected: list[str] = []
         running = 0
@@ -401,7 +379,16 @@ class ElectiveFiller:
                 break
             if running + cand.credits > budget_credits + overshoot_tolerance:
                 continue
-            if cand.code in restricted_by_selected or cand.restrictions & set(selected):
+            # rank_candidates already excludes anything restricted against
+            # what was in the plan BEFORE this call started; this catches
+            # restrictions introduced by selections made DURING this call,
+            # directly or via a forced prerequisite closure, since the
+            # ranked list is built once upfront and two candidates that
+            # conflict could otherwise both pass the initial ranking and
+            # both get selected in the same batch.
+            if would_restriction_conflict(
+                cand.code, set(selected), self.courses, already_in_plan | set(selected)
+            ):
                 continue
             limit = level_credit_limits.get(cand.level)
             if limit is not None and level_running.get(cand.level, 0) + cand.credits > limit:
@@ -419,7 +406,6 @@ class ElectiveFiller:
             if cand.tier == 1 and floor_running.get(cand.level, 0) >= level_floor_priority.get(cand.level, 0):
                 continue
             selected.append(cand.code)
-            restricted_by_selected |= cand.restrictions
             running += cand.credits
             if limit is not None:
                 level_running[cand.level] = level_running.get(cand.level, 0) + cand.credits
