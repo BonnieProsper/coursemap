@@ -406,6 +406,53 @@ _VERIFIED_PREREQ_FIXES: dict[str, dict | str] = {
     # any DIS undergraduate plan. Included for completeness/correctness of
     # the stored data, not because any current plan generation depends on it.
     "161380": "161304",
+
+    # 160212 Discrete Mathematics. Stored as a flat AND of every code in
+    # both clauses (i.e. requiring all of 160101/160102/160103/160105/
+    # 160111/160112/160132/160133/228171/228172 AND 159101/159171/230112),
+    # the same "comma-list misread as AND" bug already fixed elsewhere in
+    # this file. Real (https://www.massey.ac.nz/study/courses/discrete-
+    # mathematics-160212/, "Course planning information" > "Prerequisite
+    # courses"): "One of (160101, 160102, 160103, 160105, 160111, 160112,
+    # 160132, 160133, 228171 or 228172) and one of (159101, 159171 or
+    # 230112)" - two independent "one of" clauses, not one big AND. This
+    # was also the cause of Mathematics - Bachelor of Science appearing
+    # self-contradictory (it directly requires both 160101 and 160102,
+    # which the mis-scraped AND then also forced in via 160212's
+    # prerequisite chain, and 160105 mutually restricts both) - fixed by
+    # this correction alone, no scheduler change needed.
+    "160212": {
+        "op": "AND",
+        "args": [
+            {"op": "OR", "args": [
+                "160101", "160102", "160103", "160105", "160111",
+                "160112", "160132", "160133", "228171", "228172",
+            ]},
+            {"op": "OR", "args": ["159101", "159171", "230112"]},
+        ],
+    },
+
+    # 123201 Chemical Energetics. Stored as a flat nested AND of every code
+    # in both clauses (effectively requiring nine courses at once,
+    # including 160101 AND 160102 AND 160105 simultaneously - impossible in
+    # isolation, since 160105 mutually restricts both). Real
+    # (https://www.massey.ac.nz/study/courses/chemical-energetics-123201/):
+    # "One of (123102, 123105, 124104 or 123172) and one of (160101,
+    # 160102, 160105, 160132 or 160133)". Unlike the other entries in this
+    # registry, this is NOT a parser limitation - parse_prerequisite_text()
+    # already returns the correct tree for this exact phrasing (verified
+    # directly, same "one of (...) and one of (...)" pattern already fixed
+    # for 123305). This entry is only a stopgap for stale data scraped
+    # before that fix shipped; a fresh refresh_prerequisites run should
+    # make it redundant (and this stays correct either way, since applying
+    # an already-correct value is a no-op).
+    "123201": {
+        "op": "AND",
+        "args": [
+            {"op": "OR", "args": ["123102", "123105", "124104", "123172"]},
+            {"op": "OR", "args": ["160101", "160102", "160105", "160132", "160133"]},
+        ],
+    },
 }
 
 

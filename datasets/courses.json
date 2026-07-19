@@ -25480,7 +25480,7 @@
         "_inferred": true
       }
     ],
-    "prerequisites": null,
+    "prerequisites": "161304",
     "corequisites": [],
     "restrictions": [],
     "subject_area": "Statistics",
@@ -25741,7 +25741,16 @@
         "semester": "Semester 2"
       }
     ],
-    "prerequisites": null,
+    "prerequisites": {
+      "op": "OR",
+      "args": [
+        "161101",
+        "161111",
+        "161122",
+        "161140",
+        "297101"
+      ]
+    },
     "corequisites": [],
     "restrictions": [
       "161221"
@@ -26210,7 +26219,16 @@
         "semester": "Semester 1"
       }
     ],
-    "prerequisites": null,
+    "prerequisites": {
+      "op": "OR",
+      "args": [
+        "161101",
+        "161111",
+        "161122",
+        "161140",
+        "297101"
+      ]
+    },
     "corequisites": [],
     "restrictions": [
       "161220"
@@ -26317,7 +26335,15 @@
         "_inferred": true
       }
     ],
-    "prerequisites": null,
+    "prerequisites": {
+      "op": "OR",
+      "args": [
+        "161101",
+        "161111",
+        "161122",
+        "161140"
+      ]
+    },
     "corequisites": [],
     "restrictions": [
       "161322"
@@ -27221,7 +27247,7 @@
       "op": "AND",
       "args": [
         {
-          "op": "AND",
+          "op": "OR",
           "args": [
             "160101",
             "160102",
@@ -27231,26 +27257,16 @@
             "160112",
             "160132",
             "160133",
-            {
-              "op": "OR",
-              "args": [
-                "228171",
-                "228172"
-              ]
-            }
+            "228171",
+            "228172"
           ]
         },
         {
-          "op": "AND",
+          "op": "OR",
           "args": [
             "159101",
-            {
-              "op": "OR",
-              "args": [
-                "159171",
-                "230112"
-              ]
-            }
+            "159171",
+            "230112"
           ]
         }
       ]
@@ -72090,32 +72106,22 @@
       "op": "AND",
       "args": [
         {
-          "op": "AND",
+          "op": "OR",
           "args": [
             "123102",
             "123105",
-            {
-              "op": "OR",
-              "args": [
-                "124104",
-                "123172"
-              ]
-            }
+            "124104",
+            "123172"
           ]
         },
         {
-          "op": "AND",
+          "op": "OR",
           "args": [
             "160101",
             "160102",
             "160105",
-            {
-              "op": "OR",
-              "args": [
-                "160132",
-                "160133"
-              ]
-            }
+            "160132",
+            "160133"
           ]
         }
       ]

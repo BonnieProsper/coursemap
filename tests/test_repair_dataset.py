@@ -291,6 +291,8 @@ def test_verified_fixes_applies_every_documented_code():
         _course("161250", prereqs=["161111"]),
         _course("161251", prereqs=["161111"]),
         _course("161380", prereqs=[]),
+        _course("160212", prereqs=["160101"]),
+        _course("123201", prereqs=["123102"]),
         _course("999999", prereqs=["161111"]),  # not in the fix list, must be untouched
     ]
     fixed, n = apply_verified_prereq_fixes(courses)
