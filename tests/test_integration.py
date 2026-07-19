@@ -690,16 +690,25 @@ def test_elective_suggestions_zero_gap_returns_empty(svc):
 def test_no_prereq_ordering_violations_in_any_plan(svc):
     """
     For every plan that generates successfully, no course may appear in a
-    semester before a prerequisite that is also in the plan.
+    semester before its prerequisite expression is satisfied by courses
+    scheduled (or completed) in an earlier semester.
 
-    This test catches rebalancer bugs where two semesters of the same type
+    This catches rebalancer bugs where two semesters of the same type
     (e.g. two S2 years) are incorrectly merged, putting a course in the same
     semester as its own prerequisite.
 
     Before the Pass 3 merge guard was added, 10 majors had violations of
     this form (e.g. 150106 and 150206 co-scheduled in S2 for Mātauranga
     Toi Māori majors).
+
+    Checks satisfaction via prereqs_met (the same function the scheduler
+    itself uses), not by treating every code an OR expression mentions as
+    individually required - a course whose prerequisite is "A or B" is
+    satisfied once either branch is done, even if the other branch also
+    happens to appear later in the same plan as an unrelated elective.
     """
+    from coursemap.domain.prerequisite_utils import prereqs_met
+
     violations: list[str] = []
 
     for m in svc.majors:
@@ -708,20 +717,25 @@ def test_no_prereq_ordering_violations_in_any_plan(svc):
         except ValueError:
             continue
 
+        # The real generator's "known" set (coursemap/planner/generator.py,
+        # PlanGenerator._known_codes) is that major's own working set, not
+        # every course in the dataset - a prerequisite code outside it is an
+        # admission gatekeeper (e.g. an undergrad course a postgrad
+        # prerequisite names, already assumed complete) and is treated as
+        # satisfied. Using the full dataset here would falsely flag those as
+        # violations. planned_codes is the closest available approximation
+        # from the plan object alone.
         planned_codes = {c.code for s in plan.semesters for c in s.courses}
         done: set[str] = set()
 
         for sem in plan.semesters:
             for c in sem.courses:
                 course = svc.courses.get(c.code)
-                if course and course.prerequisites:
-                    needed = course.prerequisites.required_courses() & planned_codes
-                    missing = needed - done
-                    if missing:
-                        violations.append(
-                            f"{m['name']}: {c.code} in {sem.year} {sem.semester} "
-                            f"before prerequisite(s) {missing}"
-                        )
+                if course and course.prerequisites and not prereqs_met(course.prerequisites, done, planned_codes):
+                    violations.append(
+                        f"{m['name']}: {c.code} in {sem.year} {sem.semester} "
+                        f"before its prerequisites were satisfied"
+                    )
             done.update(c.code for c in sem.courses)
 
     assert not violations, (
