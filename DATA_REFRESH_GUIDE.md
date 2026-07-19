@@ -55,7 +55,7 @@ pip install -e ".[dev]"
 Before merging the PR:
 
 - [ ] `python -m coursemap.validation.dataset_validator` → 0 errors
-- [ ] `pytest tests/ -q` → 388/388 pass
+- [ ] `pytest tests/ -q` → passes at the same rate as before the refresh (check CHANGELOG.md's most recent entry for the current known baseline - don't expect 0 failures, some are documented known gaps, but the count shouldn't get worse)
 - [ ] CS BSc pools: at least 15 options each? `python -c "import json; d=json.load(open('datasets/majors.json')); cs=next(m for m in d if 'Computer Science' in m['name'] and 'Bachelor of Science' in m['name']); [print(ch['credits'], len(ch['course_codes'])) for ch in cs['requirement']['children'] if ch.get('type')=='CHOOSE_CREDITS']"`
 - [ ] BHSc plan generates 360cr? `python -c "from coursemap.ingestion.dataset_loader import *; from coursemap.services.planner_service import *; c=load_courses(); m=load_majors(); s=PlannerService(c,m); p=s.generate_best_plan('Mental Health and Addiction – Bachelor of Health Science', campus='D', mode='DIS', start_year=2026); print(p.total_credits())"`
 - [ ] Human Nutrition generates 360cr (a known historically-tricky major)?
@@ -68,16 +68,21 @@ The `build_courses_dataset.py` scraper extracts prerequisites from the entire co
 - Cross-subject prerequisites include noise (e.g. Health courses accidentally listing Animal Science codes)
 - `repair_dataset.py` strips the most egregious noise using heuristics
 
-**For truly correct prerequisites**, the `prerequisite_scraper.py` module uses targeted HTML parsing of the prerequisites section. Run it after a scrape:
+**For truly correct prerequisites**, use the dedicated refresh script instead of the general dataset build - it does targeted HTML parsing of the prerequisites section, has retry/backoff and a regression guard against stale/corrupted fetches (see DATA_QUALITY.md), and only writes if the run looks healthy:
 
 ```bash
-python -m coursemap.ingestion.prerequisite_scraper \
-  --input datasets/courses.json \
-  --output datasets/courses.json \
-  --sleep 1.0
+python -m coursemap.ingestion.refresh_prerequisites
+python -m coursemap.ingestion.refresh_prerequisites --only-missing   # faster, skips already-scraped
+python -m coursemap.ingestion.refresh_prerequisites --dry-run --limit 50   # test first
 ```
 
-This takes longer but produces significantly better prerequisite data.
+This takes longer than the general scrape but produces significantly better prerequisite data.
+
+After any re-scrape, also run the contradiction audit - it catches "one of A, B, C" lists that got misread as a flat AND, the single most common real bug found in this dataset so far:
+
+```bash
+python scripts/audit_prereq_contradictions.py
+```
 
 ### Major requirement completeness
 The `build_majors_dataset.py` scraper uses Massey's qualification web pages. These sometimes:

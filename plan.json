@@ -1,21 +1,21 @@
 {
   "meta": {
-    "major": "Statistics \u2013 Bachelor of Science",
+    "major": "Computer Science \u2013 Bachelor of Information Sciences",
     "campus": "D",
     "mode": "DIS",
     "start_year": 2026,
-    "credits_planned": 240,
+    "credits_planned": 180,
     "credits_prior": 0,
     "credits_transfer": 0,
-    "credits_total": 240,
+    "credits_total": 180,
     "degree_target": 360,
-    "free_elective_gap": 120
+    "free_elective_gap": 180
   },
   "semesters": [
     {
       "year": 2026,
       "semester": "S2",
-      "credits": 60,
+      "credits": 30,
       "courses": [
         {
           "code": "159100",
@@ -25,22 +25,8 @@
           "prereq_data_available": false
         },
         {
-          "code": "160101",
-          "title": "Calculus",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": false
-        },
-        {
-          "code": "161111",
-          "title": "Applied Statistics",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": false
-        },
-        {
-          "code": "233105",
-          "title": "Our Dynamic Earth",
+          "code": "297101",
+          "title": "Statistical Data Science",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": false
@@ -50,7 +36,7 @@
     {
       "year": 2027,
       "semester": "S1",
-      "credits": 60,
+      "credits": 30,
       "courses": [
         {
           "code": "159102",
@@ -65,45 +51,17 @@
           "credits": 15,
           "full_year": false,
           "prereq_data_available": false
-        },
-        {
-          "code": "247111",
-          "title": "Science and Sustainability for Agriculture and Horticulture",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": false
-        },
-        {
-          "code": "161222",
-          "title": "Design and Analysis of Experiments",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": false
         }
       ]
     },
     {
       "year": 2027,
       "semester": "S2",
-      "credits": 45,
+      "credits": 15,
       "courses": [
         {
-          "code": "160211",
-          "title": "Linear Algebra",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": true
-        },
-        {
-          "code": "161251",
-          "title": "Regression Modelling",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": false
-        },
-        {
-          "code": "233214",
-          "title": "GIS and Spatial Statistics",
+          "code": "159270",
+          "title": "Hardware-Oriented Computing",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true
@@ -116,22 +74,22 @@
       "credits": 45,
       "courses": [
         {
-          "code": "161250",
-          "title": "Data Analysis",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": false
-        },
-        {
-          "code": "161324",
-          "title": "Data Mining",
+          "code": "159201",
+          "title": "Algorithms and Data Structures",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true
         },
         {
-          "code": "161331",
-          "title": "Biostatistics",
+          "code": "159223",
+          "title": "Artificial Intelligence Methods",
+          "credits": 15,
+          "full_year": false,
+          "prereq_data_available": true
+        },
+        {
+          "code": "159234",
+          "title": "Object-Oriented Programming",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true
@@ -144,15 +102,36 @@
       "credits": 30,
       "courses": [
         {
-          "code": "161323",
-          "title": "Multivariate Analysis",
+          "code": "159324",
+          "title": "Artificial Intelligence in Computer Vision",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true
         },
         {
-          "code": "161304",
-          "title": "Statistical Modelling",
+          "code": "159333",
+          "title": "Programming Project",
+          "credits": 15,
+          "full_year": false,
+          "prereq_data_available": false
+        }
+      ]
+    },
+    {
+      "year": 2029,
+      "semester": "S1",
+      "credits": 30,
+      "courses": [
+        {
+          "code": "159341",
+          "title": "Programming Languages, Algorithms and Concurrency",
+          "credits": 15,
+          "full_year": false,
+          "prereq_data_available": true
+        },
+        {
+          "code": "159342",
+          "title": "Operating Systems and Networks",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true
