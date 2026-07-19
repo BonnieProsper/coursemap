@@ -214,7 +214,7 @@ Turning this rule on surfaced real, pre-existing problems across a substantial s
 
 **1. Pre-existing failures unrelated to this rule (~12 of 40 sampled).** Things like a required course only offered in Summer School while `--no-summer` is set (Environmental Science, Ecology and Conservation, see the separate Summer School note elsewhere in this file), or majors with zero DIS offerings at all (several Bachelor of Design majors, evidently on-campus-only programmes). These fail identically whether the level-progression rule is on or off, confirming they predate this audit entirely.
 
-**2. Required courses that cannot, by themselves, reach the credit needed to unlock a later required course (~6 of 40 sampled, e.g. Te Reo Māori, Educational Psychology, Media Studies, Linguistics, Property).** `_repair_level_progression`'s swap/drop mechanism only ever touches *elective pool* selections. Required (non-pool) courses are always kept, by design, since dropping an actually-required course would silently produce an incomplete degree. When the required-course list itself doesn't add up to 45cr at the level below a later required course, there's nothing the scheduler can rearrange; the major's required-course list, as scraped, is genuinely incomplete for a DIS student following only what's listed as required. This is the same root cause already documented for Chinese, Bachelor of Arts (below), confirmed, not a new bug, just newly visible because nothing previously checked for it.
+**2. Required courses that cannot, by themselves, reach the credit needed to unlock a later required course (~6 of 40 sampled, e.g. Te Reo Māori, Educational Psychology, Media Studies, Linguistics, Property).** `_repair_level_progression`'s swap/drop mechanism only ever touches *elective pool* selections. Required (non-pool) courses are always kept, by design, since dropping an actually-required course would silently produce an incomplete degree. When the required-course list itself doesn't add up to 45cr at the level below a later required course, there's nothing the scheduler can rearrange; the major's required-course list, as scraped, is genuinely incomplete for a DIS student following only what's listed as required. This is the same root cause already documented for Chinese, Bachelor of Arts (below), confirmed, not a new bug, just newly visible because nothing previously checked for it. English, Bachelor of Arts has the identical shape outside the original sample: `139139` plus a 15cr L200 pool cap out at 30cr L200, short of the 45cr its 45cr L300 pool (`139305` etc.) needs.
 
 **3. Named elective pools that cannot, on their own, supply enough lower-level credit to justify their own higher-level selections (~13 of 40 sampled, e.g. Accountancy, Spanish, Japanese, Psychology, Ecology and Conservation, Business Analytics, Software Engineering).** `_select_electives` (in `coursemap/optimisation/search.py`) picks each pool's minimum-cost subset independently, with no visibility into whether the combined selection across pools satisfies the 45cr rule. A repair pass (`_repair_level_progression`) handles same-pool swaps (trading a higher-level pool member for an unselected lower-level one from the *same* pool, since pool credit can't cross-subsidise (confirmed the hard way: an early version that swapped across pools silently broke the donor pool's own target)) and, when no swap exists, drops the unschedulable higher-level selection so the *discovery* pass doesn't deadlock the whole search. This successfully avoids exceptions, but the resulting credit shortfall can only be closed by **courses that are members of that specific named pool**.
 `DegreeValidator`'s `ChooseCreditsRequirement` check (`coursemap/validation/engine.py`) only counts a pool's own listed `course_codes`, so generic filler from outside the major, however well it's prioritised, structurally cannot satisfy it.
@@ -274,601 +274,69 @@ python -m coursemap.ingestion.repair_dataset
 After re-scraping, restart the server. The dataset is cached at startup.
 
 
-## RESOLVED (this session): pool-reuse / top-up restriction bug
+## Known Open Items
 
-**Root cause found and fixed.** `_select_electives`'s top-up pass (in
-`optimisation/search.py`) added courses to spend leftover global elective
-budget without checking `_conflicts_with_selected`, unlike its own Pass 1
-loop which does. When leftover budget existed after all named pools met
-their own per-pool targets, top-up would add a *mutually-restricted
-alternative* member of an already-satisfied "choose one of N" pool (e.g.
-Chemistry's 247111/247112/247113/247114 cluster), producing an
-unschedulable plan (two courses the student can never actually both
-enrol in).
+`scripts/audit_prereq_contradictions.py` finds courses whose own stored
+prerequisite requires two mutually-restricting codes in the same AND
+clause - always a scraper error (a "one of A, B, C" list parsed as a flat
+AND), never a real requirement. Run it after every re-scrape. It's how
+160212 and 123201 were confirmed this pass; running it across the whole
+dataset (not just the two courses a broken major happened to point at)
+found 6 more, not yet live-verified:
 
-This was the root cause of the Chemistry BSc failure, and turned out to
-also be the root cause of two previously-separate documented issues:
-- `test_ecology_bsc_requires_summer_school_at_distance` (previously failing)
-- The Mental Health and Addiction BHSc exact-8-of-8-credit pool shortfall
-  (previously tracked as a "genuine scheduler placement failure" in
-  `test_known_bug_exactly_sized_pool_not_fully_scheduled` - it wasn't; the
-  top-up bug elsewhere in the same plan was consuming scheduler slots this
-  zero-slack pool needed). Test renamed to
-  `test_mental_health_addiction_exact_pool_fully_scheduled` and updated to
-  assert full correctness now that it's fixed.
+- `241305` / `241304` (both require `241301` AND `241302`, which restrict each other)
+- `286321` / `117243` / `117226` (all require `117153` AND `117155`, which restrict each other)
+- `120303` (requires `120201` AND `120219`, which restrict each other)
 
-**Fix**: added the same `_conflicts_with_selected(code)` guard from Pass 1
-to the top-up pass's inner loop. One conditional, no architectural change.
+Full history is in CHANGELOG.md. This section is the current, still-open list only.
 
-**Verified impact**:
-- Full test suite: 16 failed / 744 passed -> 14 failed / 747 passed (zero
-  new regressions, confirmed via full-suite diff before/after).
-- 111-major single-major sweep (D/DIS): 71/111 -> 73/111.
+Full history of what was found and fixed, and when, is in CHANGELOG.md.
+This section is the current, still-open list only.
 
-**Also done this session**: `_plan_for_major` in `optimisation/search.py`
-(previously 576 lines) was decomposed into three methods -
-`_plan_for_major` (~348 lines), `_validate_plan_with_tolerance`, and
-`_trim_plan_to_credit_target` - verified byte-for-byte behavior-identical
-via full-suite re-run after each extraction (16/744 before and after,
-before the top-up fix above was applied). This is what made the top-up
-bug findable in the first place; it was buried in a 576-line function
-threading a dozen shared local variables.
+**Double-major semester-timing sensitivity.** Not investigated in detail.
 
-**Still open, not touched this session**: the remaining ~14 test failures
-are the double-major semester-timing sensitivity issues and the
-prerequisite-tokenizer data-quality gaps documented above. The highest
-remaining lever is still the live `refresh_prerequisites` re-scrape - see
-the top of this document.
-
-**Added this session**: `test_select_electives_topup_skips_restriction_conflicts`
-in `test_integration.py` - an isolated unit test that builds a synthetic
-restricted-pool scenario directly against `_select_electives`, independent
-of `majors.json`/`courses.json` content. Confirmed to fail against the
-pre-fix code (picks 4 of 4 mutually-restricted courses) and pass against
-the fix, so it's a genuine regression test for this specific mechanism,
-not just an assertion that happens to pass.
-
-**Flagged for the next re-scrape, NOT fixed - unverified against live
-data, do not hand-correct without checking the actual page**: of the 38
-majors still failing the D/DIS sweep after this session's fix, 10 show
-the same generic "No schedulable courses remain (N blocked)" error. Two
-were spot-checked:
-
+**10 majors in the D/DIS sweep fail with a generic "No schedulable
+courses remain" error, not individually traced.** Two spot-checked:
 - `234338` (Sport and Exercise Practicum) has a 6-course flat AND
   prerequisite (`234214`, `234215`, `234236`, `234243`, `152237`,
-  `152238` - all L200, all individually offered D/DIS). Six concurrent
-  L200 prerequisites for one course is exactly the shape of the
-  comma-parser bug already found elsewhere ("one of A, B, C, D, E, F"
-  misread as "all of"), but none of these six restrict each other in the
-  current dataset, so the mutual-restriction detector used to find the
-  earlier instances of this bug couldn't catch it. Worth checking first
-  after a re-scrape.
-- `256304` (Positive Learning Environments -> requires `256201`) and
-  `233209` (Earth's Critical Resources -> requires `233105`) each have a
-  single, valid, D/DIS-offered prerequisite with no prerequisites of its
-  own - the block here isn't a data-parsing issue, it looks like a
-  semester-timing/scheduling-horizon limitation instead (a different bug
-  class from the one fixed this session). Not investigated further.
+  `152238`, all L200, all offered D/DIS). Six concurrent L200
+  prerequisites for one course has the same shape as the comma-parser
+  bug ("one of A, B, C, D, E, F" misread as "all of"), but none of the
+  six restrict each other in the current dataset, so the
+  mutual-restriction cross-check that found other instances of this bug
+  didn't catch it. Worth checking against the live page first.
+- `256304` (Positive Learning Environments, requires `256201`) and
+  `233209` (Earth's Critical Resources, requires `233105`) each have a
+  single valid D/DIS prerequisite with no prerequisite of its own - not
+  a data-parsing issue, looks like a scheduling-horizon limitation
+  instead. Not investigated further.
 
-The other 8 "blocked" failures in the sweep were not individually
-triaged this session.
+**"One of"/"any of" detection in `prerequisite_scraper.py` only fires on
+those two exact phrases.** Other wording for the same meaning ("Choice
+of X, Y, Z", "Either X, Y or Z", "Select one of X, Y") would still fall
+back to comma-as-AND, reproducing the original bug under different
+phrasing. Not fixed without a live example - guessing at phrasing
+variants risks introducing a wrong pattern. Worth grepping a dry-run's
+output for "of " near comma-separated code lists that didn't get OR
+treatment.
 
-## RESOLVED (this session, before the live re-scrape): Oxford-comma data-loss bug in the tokenizer
+**Parenthesized "one of" lists may exist beyond the one confirmed
+course.** `123305`'s page uses a bare parenthesized comma list with no
+explicit "or"s; the regex now handles that exact shape. Unknown whether
+other courses use the same phrasing or something still different. Worth
+grepping a dry-run's debug output for `"of ("`.
 
-**Found by stress-testing the tokenizer against synthetic phrasing before
-running it live**, not found via a failing major. A comma immediately
-followed by a literal "and" or "or" - the common Oxford-comma phrasing
-`"One of A, B, C or D, and E"`, meaning `(A or B or C or D) AND E` - made
-`tokenize()` emit two adjacent connector tokens (the comma's implicit
-"and", then the literal word's "and"). The grammar has no rule for two
-connectors in a row, so the second fell through `_parse_factor`'s
-"skip unexpected token" fallback as a bare `None` operand, which
-`dataset_loader._build_expr_from_struct` then silently drops as a child.
-Net effect: `E` disappears from the parsed requirement entirely, with no
-error or warning - the opposite direction of the "one of A, B, C or D"
-AND-vs-OR bug above (that one made requirements look too strict; this one
-makes them look too weak), and just as capable of producing a plan that
-looks valid but wouldn't actually let the student enrol.
+**Whether the Oxford-comma tokenizer bug (comma directly followed by a
+literal "and"/"or") already corrupted anything in the current
+`courses.json`.** The fix only affects future scrapes. Worth checking
+during the next re-scrape's dry-run: any course whose prerequisite text
+contains ", and" or ", or" should parse to the expected number of
+top-level AND args, not one.
 
-Not yet known whether this pattern already exists anywhere in the current
-`courses.json` - the fix is in the scraper, which only affects text
-parsed during a fresh scrape, so it can't have corrupted anything already
-in the dataset unless a prior scrape run hit this exact phrasing. Worth
-checking for during the upcoming re-scrape's dry-run: watch specifically
-for any course whose prerequisite text contains ", and" or ", or" and
-confirm the parsed tree has the expected number of top-level AND args
-(one for the enumeration, one for the final course) rather than one.
-
-**Fix**: the tokenizer now looks ahead past a comma before deciding
-whether to emit an "and" token; if the comma is immediately followed
-(after whitespace) by a literal "and" or "or", the comma emits nothing
-and the real word supplies the one connector token that's actually
-meant. Four regression tests added in `test_prerequisite.py` covering:
-the exact bug (comma-then-"and"), the same bug without a preceding
-"one of" clause, a comma-then-"or" case (to confirm the fix doesn't
-misfire on the wrong connector), and a plain comma-only list (to confirm
-ordinary AND-via-comma is unaffected).
-
-**Also still a known gap, not fixed, needs a live example to fix
-correctly**: the "one of"/"any of" detection regex only triggers on
-those two exact phrases. If Massey's real page text ever uses different
-wording for the same "choose one" meaning - "Choice of X, Y, Z",
-"Either X, Y or Z", "Select one of X, Y" - it won't be recognised and
-will fall back to the comma-as-AND default, silently reproducing the
-original bug under different phrasing. Not fixed here because guessing
-at phrasing variants without seeing real examples in live text risks
-introducing a wrong pattern rather than a missing one. Worth grepping
-the dry-run output for "of " near comma-separated code lists that
-*didn't* get the OR treatment, as a way to find real examples of this
-if it exists.
-
-## RESOLVED (this session, before the live re-scrape): safety-abort blind spot in refresh_prerequisites.py
-
-**Found by reading the orchestration script itself, before trusting it
-against live data.** The safety check that refuses to overwrite
-`courses.json` if a scrape run looks broken only checked a single
-combined counter: a course counted as "updated" if *any* of
-prerequisites/restrictions/corequisites came back non-empty. That means
-if Massey's HTML changes in a way that breaks prerequisite extraction
-specifically (Strategy 1 in `prerequisite_scraper.py` depends on the
-exact `course-intro__col-header` CSS class) while restriction/
-corequisite extraction keeps working through a different code path, the
-combined counter stays healthy, the abort never fires, and the script
-silently overwrites every course's prerequisites with `None` - the one
-field this entire exercise exists to refresh - with no warning.
-
-Proved this wasn't theoretical: wrote a test simulating exactly this
-(`restrictions` non-empty, `prerequisites` always `None`, 150 synthetic
-courses) and ran it against the pre-fix script. It wrote the corrupted
-data to `courses.json` without complaint.
-
-**Fix**: track prerequisites/restrictions/corequisites found-counts
-separately (logged every run now, not just the combined figure), and
-added a second abort check specific to prerequisites collapsing to zero
-across 100+ courses, independent of how restrictions/corequisites did.
-Deliberately did not add the same hard-zero check for restrictions or
-corequisites individually - those are legitimately sparse under normal
-conditions (~24% populated per the top of this document), so a low
-count there isn't a reliable broken-scraper signal the way it is for
-prerequisites, and a hard threshold would risk false-aborting a normal
-run. Four tests added in `test_refresh_prerequisites.py` (new file):
-the exact partial-collapse scenario, a healthy run still writes
-correctly, the original total-collapse check still works, and dry-run
-never writes regardless.
-
-## RESOLVED (this session, live-verified against Massey's real page): parenthesized "one of" lists
-
-**Found via the actual dry-run against live data, not speculation.**
-`234338`'s repro suggested the same AND-vs-OR bug might be occurring
-under phrasing the tokenizer didn't recognize; running the exact 7
-flagged courses against the live scraper turned up `123305`'s real page
-text: `"One of (123101, 123102, 123104, 123105, 123171, 123172) and one
-of (247111, 247112, 247113, 247114)"`.
-
-The `_ONE_OF_FLAT_RE` regex deliberately excluded any parenthesized
-comma list, on the documented assumption that Massey always spells out
-explicit "or"s inside parens when a "one of" clause needs combining with
-something else (e.g. the already-correct `"(One of (161122 or 161220 or
-233214) and one of (160101 or 160102 or 160105))"`). `123305`'s real
-page falsifies that assumption for at least one course: it uses a bare
-parenthesized comma list, no explicit "or"s. Both "one of (...)" clauses
-fell through to comma-as-AND, producing `AND(AND(6 courses),
-AND(247111, 247112, 247113, 247114))` - the second inner AND requiring
-four courses that mutually restrict each other, a logical impossibility.
-
-**Fix**: `_ONE_OF_FLAT_RE` now optionally matches a single pair of
-parentheses directly wrapping the comma list right after "one of"/"any
-of". Kept narrow deliberately - matches one direct paren pair, not
-general nested grouping - so it only covers the exact pattern now
-confirmed live, not a guess at deeper structures. Verified it doesn't
-touch the already-correct explicit-"or"-in-parens form (added as its own
-regression test). Two tests added: the exact live `123305` text, and the
-explicit-or-in-parens case that must stay unaffected.
-
-**Not yet known**: whether other courses use this same parenthesized
-comma-list phrasing (likely, given it wasn't a one-off typo but a
-distinct, consistent style choice on at least one page) or a still-
-different phrasing not yet seen. Worth specifically grepping the full
-re-scrape's dry-run debug output for `"of ("` to find every course using
-this pattern and spot-checking a sample once the real scrape runs.
-
-## RESOLVED (this session): restriction-conflict validation added, and a major true-baseline correction
-
-**DegreeValidator never checked mutual restrictions at all.** Restriction-
-conflict avoidance was scattered ad-hoc across `elective_filler.py`,
-`generator.py`, and `search.py`, each independently trying to remember
-not to add a conflicting course - exactly the fragile pattern that let
-the top-up-pass bug (fixed earlier this session) slip through. Added a
-single authoritative check to `DegreeValidator.validate()`, so no
-current or future code path can produce a plan reporting as valid while
-requiring two courses a student could never actually both enrol in.
-
-**This immediately surfaced that the "73/111" and "62/111" sweep numbers
-reported earlier in this session were both undercounting the true scope**,
-in two ways:
-1. The 62/111 number itself was correct for what it measured (a single
-   D/DIS/auto_fill sweep), but a much larger true count was hidden by
-   `data/plans.db` accumulating stale cache entries across repeated test
-   runs *within this same session* - entries cached under `_CACHE_VERSION
-   = v7.2` (bumped for the search.py fix) that predated the
-   DegreeValidator restriction check being added afterward, and so never
-   got re-validated against it. `_CACHE_VERSION` bumped again to `v7.3`
-   to invalidate them; **any change to validation logic needs the same
-   bump as a change to generation logic - both make a cached plan
-   potentially stale.**
-2. With the cache genuinely cleared, the full test suite's true count is
-   **71 failed / 704 passed**, not 39. The overwhelming majority of the
-   increase (~30 of the ~40 new failures beyond the already-understood
-   12-major set) all trace to a single major, `Computer Science - Bachelor
-   of Information Sciences`, used throughout `test_server_endpoints_misc.py`
-   as a generic "known-working major" fixture in dozens of unrelated
-   tests. It isn't 30 separate bugs - it's one broken major surfacing
-   through 30 call sites that happened to depend on it working.
-
-**Strong, concrete, not-yet-verified lead on the root cause**: unlike
-Chemistry's bug (an elective-filler/top-up selection issue),
-`Computer Science - Bachelor of Information Sciences`' conflicting codes
-(`159100`/`159101`, `160101`/`160102`/`160105`) are baked directly into
-`majors.json`'s own requirement tree - confirmed by checking the raw
-tree data directly, no filler/scheduling logic involved. This points to
-`major_parser.py`, not `prerequisite_scraper.py` - a completely different
-parser (major-requirement pages, not course-prerequisite text) that has
-never been audited this session. Reading it found the same *shape* of
-bug: `.course-schedules` blocks are only treated as an elective pool
-(OR) if their summary text literally contains the word "choose"
-(case-insensitive); otherwise every code in that block is treated as
-individually required (AND). If Massey's actual page for this major
-expresses this specific choice with different wording, this is the same
-root-cause pattern as the `123305`/`234338` prerequisite-text bugs, just
-manifesting through a different parser. **Not fixed - needs the same
-live-page verification `123305` got before touching it.** URL:
-`https://www.massey.ac.nz/study/all-qualifications-and-degrees/bachelor-of-information-sciences-UBINS/computer-science-UBINS1JCMSC1/`
-
-**Also added this session**: shared-link self-healing. `plan_store`'s
-`plan_id`-keyed lookups (the actual permalink mechanism - distinct from
-the `_plan_cache_key`-based cache, which already self-invalidates via
-`_CACHE_VERSION`) previously served whatever was stored, forever, with
-no check at all. `_get_plan_or_heal` in `server.py` now runs the cheap,
-tree-independent restriction check against current catalogue data on
-every read; if clean, returns the stored result unchanged (no
-performance cost for the common case); if a conflict is found, transparently
-regenerates via the same `_execute_plan` path fresh requests use and
-heals the store in place under the same `plan_id`, so the link keeps
-working and stays fixed going forward. If regeneration also fails (the
-major genuinely can't produce a valid plan right now), returns a clear
-409 rather than either crashing or silently serving the known-broken
-plan. Wired into all 5 direct-plan_id-lookup endpoints (view, fees,
-validate, advisor-summary export, markdown export) - the two export
-endpoints matter most in practice, since a broken plan handed to a real
-academic advisor as a downloaded document is worse than one merely
-viewed on screen. Proven end-to-end (not just unit-tested) with a real
-generate -> corrupt-the-store -> read -> confirm-healed -> confirm-stays-healed
-test in `test_server_endpoints_misc.py`.
-
-## RESOLVED (this session, live-verified against the CS-BIS page): prose choice language in major requirement pages
-
-**Root cause of the majority of the `Computer Science - Bachelor of
-Information Sciences` conflicts**, live-diagnosed by fetching the actual
-page and inspecting the "Planning information" block directly (not
-guessed): Massey expresses some major-level requirement choices as plain
-English prose within a single bullet - `"At least one mathematics course
-- one or more of 160105, 160101, 160102. Note: you can also take 160104
-as an elective..."` and `"At least one statistics course - one of 161111
-or 297101. Note: 297101 is more relevant to computing majors"` - rather
-than through the structured `.course-schedules` "Choose N credits" widget
-`major_parser.py` already handles correctly (Step 2). Step 1 (the
-Planning-information-bullet parser) had no concept of choice language at
-all: it extracted the bullet's course link(s) as flat individually-
-required courses regardless of what the prose actually said, which is
-exactly what turned "pick one of these three mutually-restricted courses"
-into "you must complete all three simultaneously" - impossible, and the
-root cause of a `Computer Science - Bachelor of Information Sciences`
-plan being unplannable at all, not just via elective/filler selection
-(the Chemistry-class bug) but directly from its own hard requirements.
-
-Also confirmed live: `159100` (part of the stored conflict set) does
-not appear anywhere on the current live page at all - that part is
-simply stale data, not a parser bug, and will correct itself once a
-fresh scrape runs.
-
-**Fix**: Planning-information bullets are now checked for the confirmed
-trigger phrases ("one or more of", "at least one of", "one of", "any
-of") before falling through to the original single-code extraction
-(completely unchanged for every bullet that doesn't match - the
-overwhelming majority). When matched, only the course codes within the
-same sentence as the trigger phrase become a `CHOOSE_CREDITS` pool -
-deliberately not the whole bullet, since Massey's own text can mention
-another code afterward as a mere aside (`160104` above, explicitly
-framed as an optional elective, not part of the choice) that must not be
-pulled into the requirement.
-
-**Verified, not just assumed**: checked all six courses involved (`160105`, `160101`, `160102`, `160104`, `161111`, `297101`) directly against `courses.json` - every one of them is exactly 15 credits. `credits=15` is confirmed correct for this specific case, not just a reasonable pattern-based guess.
-
-**Operational note for whoever runs the next major-requirements rebuild**:
-`build_majors_dataset.py` does a full rewrite of `majors.json`, unlike
-`refresh_prerequisites.py`'s targeted 3-field update - a bigger-blast-
-radius operation. Checked whether this risks regressing the credit
-values `backfill_elective_credits.py` exists to fix: as of this session,
-it doesn't - all 958 `CHOOSE_CREDITS` pools currently in `majors.json`
-already have valid non-zero credit values, and `major_parser.py`
-already extracts `.course-schedules` credit numbers correctly inline, so
-a fresh rebuild would reproduce them directly rather than losing them.
-Running `backfill_elective_credits.py` afterward anyway costs nothing
-and adds a safety margin, but isn't the required step it might first
-appear to be.
-
-## RESOLVED (this session): `build_majors_dataset.py` had zero safety mechanisms
-
-**Found by checking before recommending anyone run it**, not after.
-Unlike `refresh_prerequisites.py`, which had a dry-run flag, a limit
-flag, an abort-on-mass-failure check, and an atomic write before this
-session even started, `build_majors_dataset.py` (a full rewrite of
-`majors.json`, bigger blast radius than a targeted field update) had
-none of the four: no `--dry-run`, no `--limit`, no abort check (a
-near-total scrape failure would have silently written a near-empty
-`majors.json`), and a plain `open(path, "w")` instead of a temp-file-
-then-rename atomic write (a crash mid-write could leave the file
-truncated or corrupted).
-
-Rewrote it with the exact same mechanisms `refresh_prerequisites.py`
-already established and this session already proved out: `--limit N`
-for a small test run first, `--dry-run` to preview without writing,
-abort if 0 of 20+ specialisations succeed (mirroring the existing
-pattern's threshold style), a warning (not hard-abort) if under 50%
-succeed, and atomic write via `tempfile` + `os.replace`. Also parallelized
-the fetch loop (was fully sequential, one request at a time) with the
-same concurrency-plus-ordered-output pattern, verified output order
-matches input order regardless of completion order under concurrency
-(a real thing to get right and test, not just assume).
-
-No test file existed for this module before this session (same starting
-state `refresh_prerequisites.py` was in). Added `test_build_majors_dataset.py`,
-6 tests, all network access monkeypatched: the abort case (and confirmed,
-by running the same test against the original file, that it really did
-lack this protection - not a hypothetical), a healthy run, dry-run,
-`--limit`, ordering-under-concurrency, and a specialisation with no URL
-being skipped rather than crashing the whole run.
-
-## RESOLVED: real production data corruption during the first live re-scrape attempt
-
-**This actually happened, not a hypothetical.** The first full
-`refresh_prerequisites` run against live data (2766 courses, concurrency
-10, ~9 minutes) silently corrupted at least 5 courses that were either
-previously hand-verified or freshly confirmed correct earlier in this
-same session: `123305`, `117201`, `117202`, `289250`, `289350` all came
-back `None` (total data loss), and `161324`/`234338` came back with
-genuine but truncated OR-groups (missing specific member courses) and,
-for `234338`, an entire required course silently dropped. Confirmed via
-direct re-fetch immediately afterward that all of these are fine in
-isolation - the live site and the parser are both correct right now.
-The corruption was specific to the sustained, concurrent, full-catalogue
-run itself.
-
-**Why the existing safety check didn't catch it**: the abort checks in
-`refresh_prerequisites.py` (both the total-collapse check and the
-prerequisites-specific check added earlier this session) only look at
-*aggregate* counts across the whole run. This run got `prereq: 393`
-nonzero - looked healthy in aggregate while silently corrupting an
-unknown-sized subset of individual courses. Worse: at least one
-confirmed case (`234338`) came back HTTP 200 with no exception raised at
-all - the corruption was a truncated response body under load, not a
-fetch failure, so an error-only retry mechanism would have missed it
-entirely too.
-
-**Fix, in two layers**:
-1. `scrape_course_relations` gained an opt-in `include_diagnostics`
-   parameter (default `False`, zero effect on any existing caller)
-   exposing HTTP status and response content-length - closing a gap the
-   function's own docstring already flagged before this session even
-   started ("this dataset does not currently track that distinction").
-2. `_fetch_relations` now retries (up to 3 attempts, jittered backoff)
-   on either an error/non-200 response OR a response body under 5000
-   bytes - an evidence-based threshold, not a guess: every genuinely
-   healthy Massey course page fetched anywhere in this entire
-   investigation (two separate real dry-runs) was between 9872 and
-   11097 bytes.
-3. Critically: a course that never gets a confirmed-good fetch after
-   all retries is now left completely untouched in `courses.json`,
-   rather than overwritten with the last (still-unconfirmed) attempt's
-   data. This is what actually would have prevented the real corruption
-   - not just "try harder," but "if you're still not sure, don't touch
-   what's already there." Proven with a real regression test that fails
-   against the pre-fix code and passes against the fix.
-
-**Still unknown**: the true scope of what the real run corrupted beyond
-the 7 courses spot-checked (all previously known-good from earlier in
-this session, which is exactly why the corruption was caught at all -
-an unlucky coincidence of timing, not something the run itself
-surfaced). The corrupted `courses.json` from that run was not kept
-(restored from `courses.json.bak`), so a full diff against it isn't
-possible after the fact. The retry+leave-untouched fix should prevent a
-recurrence, but there's no way to know how many *other* courses were
-silently corrupted by that one run without re-running the (now fixed)
-scraper and comparing.
-
-**Also worth investigating, not done here**: whether concurrency=10
-itself is too high for sustained Massey requests, independent of this
-fix. The dry-run tests (concurrency=8, 20 courses, ~7 seconds) never
-showed this problem; the real run (concurrency=10, 2766 courses, ~9
-minutes) did. That could mean sustained duration matters more than raw
-concurrency (a WAF or CDN tracking request volume over a time window,
-not just simultaneous connections), in which case a lower concurrency
-alone wouldn't fully solve it - but it's also possible a lower
-concurrency would help. Not tested either way this session.
-
-## STRENGTHENED (this session, after critiquing the first attempt): retry backoff and mid-run visibility
-
-Self-critique of the retry fix above found two real gaps before trusting
-it for a second attempt:
-
-1. **Backoff was too weak to address the more concerning failure mode.**
-   The original retry backoff topped out under 1.5s by the third
-   attempt - fine for a brief transient blip, nowhere near long enough
-   to escape a sustained, multi-minute throttling window if that's the
-   real cause (still unconfirmed - see above). Worse, short backoff
-   under a volume-triggered throttle means retries add more requests
-   during the exact window that's already struggling, potentially
-   making things worse, not better. Replaced with an explicit schedule
-   (`_BACKOFF_RANGES_BY_ATTEMPT`): attempt 1 unchanged (0.1-0.5s),
-   attempt 2 jumps to 3-6s, attempt 3 to 10-15s. Unlike
-   `_SUSPICIOUSLY_SHORT_RESPONSE_BYTES`, these specific numbers are a
-   reasoned judgment call, not backed by observed data from this session
-   - the direction (retry later attempts much more slowly) is what's
-   grounded in the actual failure pattern; the exact seconds are a
-   starting point to revise once a real run's retry behavior is observed.
-
-2. **No way to notice a systemic problem until the run finished.** The
-   `left_untouched` count only appeared in the final summary line -
-   during the real incident, that would have meant waiting the full ~9
-   minutes to learn anything was wrong, exactly what happened. Added a
-   loud (not just informational) warning both mid-run, at the same
-   cadence as the existing progress log, and in the final summary, if
-   the untouched rate crosses 10% of courses processed (gated by a
-   minimum sample of 50 completions before the ratio is treated as
-   meaningful, so a noisy early handful of retries doesn't false-trigger).
-   Deliberately does NOT auto-slow-down or auto-abort mid-run - both
-   were considered and rejected: dynamic slowdown needs thread-safe
-   coordination across the ThreadPoolExecutor workers (real new
-   complexity, real new risk of a bug), and abort mid-run runs into a
-   genuine design problem (results aren't written until the very end, so
-   aborting would either discard already-good work or need a new
-   partial-write path). A loud warning that leaves a human to decide is
-   the correctly-scoped fix given the actual goal was safety, not
-   maximum cleverness.
-
-Caught and fixed a real bug in my own first pass at this: an edit
-accidentally deleted the `_SUSPICIOUSLY_SHORT_RESPONSE_BYTES` constant's
-actual assignment while restructuring the surrounding comment, leaving
-only references to it (would have been a `NameError` at runtime).
-Verified syntax and import immediately after the edit, per the same
-discipline used throughout this session, rather than assuming a large
-str_replace landed cleanly.
-
-3 new tests: the backoff schedule's actual requested durations (mocking
-`time.sleep`, not just checking outcomes - proves the schedule is
-correctly wired, not just that retries happen at all), the final-summary
-threshold warning firing correctly, and the same warning NOT firing on
-a healthy low-untouched-rate run. Confirmed both the mid-run and
-final-summary warning code paths are independently reachable, not just
-one of the two.
-
-## STRENGTHENED (this session, second critique pass): permanent vs. transient failure distinction
-
-Two more real gaps found by critiquing the strengthened retry logic
-before trusting it for a second real attempt:
-
-1. **A 404/410 was retried identically to a truncated 200** - wasting up
-   to ~19s per course on the full backoff schedule (3-6s + 10-15s) for a
-   condition retrying can never fix, every single run, forever, for a
-   course that's permanently gone or moved.
-2. **The 10% threshold didn't distinguish "systemic problem" from "a
-   catalogue's normal baseline of discontinued courses"** - a stable
-   number of dead URLs could either false-trigger the warning on an
-   otherwise-healthy run, or make the warning useless if that baseline
-   was already close to 10% on its own. No data exists on how large that
-   baseline actually is for this catalogue.
-
-**Fix**: `_fetch_relations` now returns a 4th value, `permanent_failure`,
-true only for HTTP 404/410, which short-circuits immediately (no retry,
-no backoff at all beyond the first attempt's). The main loop tracks
-`permanently_missing` as a completely separate counter from
-`left_untouched` - only genuinely transient, retry-exhausted failures
-feed the systemic-problem threshold check now, both mid-run and in the
-final summary. `permanently_missing` is still reported in the final
-summary as its own plain count, deliberately with no invented threshold
-of its own, since there's no evidence yet for what's normal.
-
-5 new tests, the key one being a simulated 30%-permanently-404
-catalogue that confirms neither the mid-run nor final-summary warning
-fires for it - proving the separation actually works, not just that the
-code compiles and runs.
-
-This is the third time this session a CHANGELOG.md edit accidentally
-dropped the "### Still open" section header while inserting new content
-above it (same mistake, caught each time by grepping for the header
-immediately after editing rather than assuming the edit landed cleanly).
-This time, fixed the editing approach itself rather than just fixing the
-symptom again: used a small Python script operating on line indices
-(insert before the line matching "### Still open", rather than a
-find-and-replace on text that happened to include the header) to make
-the mistake structurally impossible rather than just checking for it
-after the fact.
-
-## RESOLVED (this session): the real production incident, its actual cause, and the fix
-
-**This happened for real, twice, and every prior hypothesis this session
-tried turned out to be wrong before landing on the right one.** A full
-`refresh_prerequisites` run against live data corrupted several courses
-- some previously hand-verified, some freshly confirmed correct earlier
-the same session. The investigation, in order:
-
-1. First theory: truncated response body under sustained concurrent
-   load. Added retry-with-backoff and a byte-length "suspiciously short
-   response" check. **Did not fix it** - a second full run, at the same
-   concurrency, corrupted the same courses again.
-2. Second theory: concurrency itself. Tested with a fully sequential
-   (`concurrency=1`) run, taking ~83 minutes instead of ~14. **Did not
-   fix it either** - the exact same courses came back wrong, with
-   byte-for-byte identical wrong values to the first run.
-3. Checked `robots.txt` directly: no `Crawl-delay`, no restriction on
-   `/study/courses/` or `/study/all-qualifications-and-degrees/` at all.
-   No documented rate limit to explain or defer to.
-4. The actual clue, in hindsight underweighted from the start: **every
-   corrupted result, in every run, was a strict subset of the correct
-   answer** - never garbage, never different codes, always *less of the
-   same correct thing*. Combined with the corruption being identical
-   across two runs at very different speeds, and recovering immediately
-   once sustained requests stopped, this points to a stale, older cached
-   version of specific pages being served under sustained request
-   volume - a currency problem, not corruption or truncation. Whole-page
-   byte count barely moves when a paragraph is missing a few codes,
-   which is exactly why the byte-length check never caught any of this.
-
-**The fix that actually addresses the real mechanism**: rather than
-trying to out-guess an undocumented, unconfirmed threshold with chunking
-and cooldowns (which would only work by luck, and wouldn't generalize to
-next year's re-scrape or a different network), `_fetch_relations` now
-compares every fresh result against the course's *already-stored* value
-before trusting it. If the fresh result's code set is a strict subset of
-what's already known - across prerequisites, restrictions, and
-corequisites independently - it's treated as suspicious and retried,
-same as the existing byte-length check, reusing all the same
-infrastructure. See `_is_suspicious_regression` in
-`refresh_prerequisites.py` and `_extract_prerequisite_codes` in
-`prerequisite_scraper.py`.
-
-**Verified against the real incident data directly**, not synthetic
-fixtures - `test_is_suspicious_regression_catches_real_123305_incident`
-and `..._234338_incident` use the exact correct-vs-corrupted values
-confirmed live this session. Also proved the fix is genuinely necessary
-(not redundant with the byte-length check) by disabling it and
-confirming the exact real corruption reoccurs: with the check off, a
-healthy-status, healthy-length, regressed response overwrites good data
-exactly as it did in the real incident; with it on, it doesn't.
-
-**Deliberate scope boundaries** (see `_is_suspicious_regression`'s
-docstring for the full reasoning): only triggers on a *strict subset*
-of existing data, never on "different but similarly-sized" results, and
-never on a first-time scrape with nothing stored yet to regress from.
-Structure-blind - doesn't detect the same codes silently changing from
-OR to AND. Every real corrupted case found this session was a
-straightforward subset; nothing has shown these other failure shapes,
-so building detection for them now would be guessing at unconfirmed
-failure modes and risking false positives on legitimate content changes.
-
-**Practical implication for running the re-scrape**: since the fix
-makes every run safe by construction (can only maintain or improve
-data, never regress it), the operationally simplest strategy is: run
-the full scrape at any reasonable speed, and if `left_untouched` comes
-back nonzero afterward, just run it again later (hours later, or the
-next day) rather than trying to manually chunk around an unconfirmed
-threshold.
-
-**Still not fully understood, and may never be**: the exact mechanism
-behind why sustained volume triggers stale content being served (CDN
-edge caching under origin load is the leading theory, consistent with
-every observation, but not independently confirmed against Massey's
-actual infrastructure). The fix doesn't depend on understanding this
-correctly, which is precisely why detecting the *symptom* (data got
-worse) rather than the *presumed cause* (too many requests too fast) is
-the more robust design.
+**Mechanism behind stale content being served under sustained request
+volume is not independently confirmed.** CDN edge caching under origin
+load is the leading theory, consistent with every observation, but
+unverified against Massey's actual infrastructure. The regression-guard
+fix (`_is_suspicious_regression`) detects the symptom rather than
+depending on the cause, so this doesn't block anything - it's just
+genuinely unknown.
