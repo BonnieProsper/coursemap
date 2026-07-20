@@ -1,116 +1,25 @@
 {
   "meta": {
-    "major": "Computer Science \u2013 Bachelor of Information Sciences",
+    "major": "Chemistry \u2013 Bachelor of Science",
     "campus": "D",
     "mode": "DIS",
     "start_year": 2026,
-    "credits_planned": 180,
+    "credits_planned": 75,
     "credits_prior": 0,
     "credits_transfer": 0,
-    "credits_total": 180,
+    "credits_total": 75,
     "degree_target": 360,
-    "free_elective_gap": 180
+    "free_elective_gap": 285
   },
   "semesters": [
     {
       "year": 2026,
       "semester": "S2",
-      "credits": 30,
-      "courses": [
-        {
-          "code": "159100",
-          "title": "Programming for Engineering and Technology",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": false
-        },
-        {
-          "code": "297101",
-          "title": "Statistical Data Science",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": false
-        }
-      ]
-    },
-    {
-      "year": 2027,
-      "semester": "S1",
-      "credits": 30,
-      "courses": [
-        {
-          "code": "159102",
-          "title": "Computer Science and Programming",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": true
-        },
-        {
-          "code": "160102",
-          "title": "Algebra",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": false
-        }
-      ]
-    },
-    {
-      "year": 2027,
-      "semester": "S2",
       "credits": 15,
       "courses": [
         {
-          "code": "159270",
-          "title": "Hardware-Oriented Computing",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": true
-        }
-      ]
-    },
-    {
-      "year": 2028,
-      "semester": "S1",
-      "credits": 45,
-      "courses": [
-        {
-          "code": "159201",
-          "title": "Algorithms and Data Structures",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": true
-        },
-        {
-          "code": "159223",
-          "title": "Artificial Intelligence Methods",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": true
-        },
-        {
-          "code": "159234",
-          "title": "Object-Oriented Programming",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": true
-        }
-      ]
-    },
-    {
-      "year": 2028,
-      "semester": "S2",
-      "credits": 30,
-      "courses": [
-        {
-          "code": "159324",
-          "title": "Artificial Intelligence in Computer Vision",
-          "credits": 15,
-          "full_year": false,
-          "prereq_data_available": true
-        },
-        {
-          "code": "159333",
-          "title": "Programming Project",
+          "code": "161111",
+          "title": "Applied Statistics",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": false
@@ -118,23 +27,44 @@
       ]
     },
     {
-      "year": 2029,
+      "year": 2027,
       "semester": "S1",
       "credits": 30,
       "courses": [
         {
-          "code": "159341",
-          "title": "Programming Languages, Algorithms and Concurrency",
+          "code": "123104",
+          "title": "Chemistry for Biological Systems",
+          "credits": 15,
+          "full_year": false,
+          "prereq_data_available": false
+        },
+        {
+          "code": "247111",
+          "title": "Science and Sustainability for Agriculture and Horticulture",
+          "credits": 15,
+          "full_year": false,
+          "prereq_data_available": false
+        }
+      ]
+    },
+    {
+      "year": 2027,
+      "semester": "S2",
+      "credits": 30,
+      "courses": [
+        {
+          "code": "122102",
+          "title": "Biochemistry",
           "credits": 15,
           "full_year": false,
           "prereq_data_available": true
         },
         {
-          "code": "159342",
-          "title": "Operating Systems and Networks",
+          "code": "160101",
+          "title": "Calculus",
           "credits": 15,
           "full_year": false,
-          "prereq_data_available": true
+          "prereq_data_available": false
         }
       ]
     }
