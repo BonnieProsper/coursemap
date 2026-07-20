@@ -45,7 +45,7 @@ _UI_HTML = (Path(__file__).parent / "ui.html").read_text(encoding="utf-8")
 
 
 # Bump when planner logic changes in a way that makes cached plans stale
-_CACHE_VERSION = "v7.4"
+_CACHE_VERSION = "v7.5"
 
 
 def _plan_cache_key(req: "PlanRequest") -> str:

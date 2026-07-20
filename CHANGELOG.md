@@ -12,7 +12,14 @@
 ### Test bug: prerequisite-ordering check used the wrong satisfaction semantics
 - `test_no_prereq_ordering_violations_in_any_plan` used `PrerequisiteExpression.required_courses()` (a union of all OR branches) to decide what a course needs done first, flagging false positives whenever the *other* OR branch was already satisfied. Rewrote to use `prereqs_met`, matching what the real generator checks, with the plan's own scheduled codes as the known-set (using the full dataset as known produces new false positives on postgrad admission-gatekeeper prerequisites, which are legitimately out of scope for a given plan).
 
-### Data-integrity findings, not fixed here (need live verification against massey.ac.nz)
+### Scheduler: prior_completed and always_include courses invisible to the conflict check
+- Found via real usage, not a test: a student with `completed` courses set got 422s that a fresh plan for the same major didn't. `_would_force_conflict`'s `locked` set (what's actually checked for conflicts) excluded `prior_completed` - it was only in `context` (used for OR-branch "already satisfied" checks). A candidate whose forced prerequisite closure restricted an already-completed course passed the check and only failed later, in full plan validation.
+- A second, deeper instance of the same class: a course already locked in via `always_include` (required directly by one major, also a pool option in a double major) can itself carry an unresolved OR prerequisite. `forced_prereq_closure` was only ever computed for the fresh candidate being considered, never for codes already in `locked_codes` - so a candidate conflicting with what an `always_include` course would *itself* eventually resolve to was invisible. Concrete case: 159102 (always_include, OR-requires 159100 or 159101) plus candidate 159261 (bare-requires 159101, which restricts 159100) - fixed CS-BInfSc + Statistics double major.
+- `would_restriction_conflict` (`prerequisite_utils.py`) now expands both the candidate's closure and every locked code's own closure before checking, not just the candidate's.
+- Regression tests: `test_select_electives_checks_conflicts_against_prior_completed`, `test_select_electives_checks_locked_codes_own_unresolved_prereq`, both proven against pre-fix code.
+- Verified in terminal (Windows, PowerShell): 7 of 12 reported failures fixed, remaining 5 confirmed pre-existing and unrelated by cross-checking the exact failure list before and after.
+
+
 - `Mathematics – Bachelor of Science` directly requires both `160101` and `160102`, but its own 4-candidate L200 pool needs all 4, one of which (`160212`) requires `160105`, which restricts both. Unsatisfiable as scraped, confirmed as a single major with no double-major involved. See DATA_QUALITY.md.
 - `Animal Science – Master of Science` directly requires both `119728` and `162760`, which mutually restrict each other. Same shape. Plausibly an AND/OR scraper confusion given the code-prefix mismatch, unverified.
 - `English – Bachelor of Arts`'s "blocked" required courses are the already-documented 45cr level-progression gap (previously only named for Chinese BA), not a new issue.

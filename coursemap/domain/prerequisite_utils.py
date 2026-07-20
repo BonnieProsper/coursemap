@@ -111,14 +111,25 @@ def would_restriction_conflict(
     """
     True if adding `code` would conflict, directly or transitively, with
     anything in `locked_codes` (already-selected or otherwise-committed
-    course codes it must not restriction-conflict with).
+    course codes it must not restriction-conflict with) - or with anything
+    THOSE codes will themselves eventually force in via their own
+    unresolved prerequisites.
 
-    Checks `code`'s own restrictions field against `locked_codes` both
-    ways (scraped restriction data isn't guaranteed to list a pair from
-    both sides), then does the same for every course in `code`'s forced
-    prerequisite closure (see forced_prereq_closure) - a course can force
-    a restricted course in via its prerequisite chain without carrying
-    any restriction of its own.
+    That second part matters for a case direct-only closure checking
+    misses: a course already in locked_codes (e.g. one entered via
+    always_include, not picked from a pool) can itself carry an
+    unresolved OR prerequisite. Nothing has walked ITS closure yet, since
+    forced_prereq_closure is normally only computed for a fresh candidate.
+    If the candidate's own closure conflicts with what that locked
+    course's closure will eventually add, the conflict is real but
+    invisible unless both sides are expanded. Concrete case: 159102 (OR-
+    requires 159100 or 159101) already locked in via always_include,
+    candidate 159261 (bare-requires 159101, which restricts 159100) -
+    159100 isn't in locked_codes yet, only 159102 is, so a candidate-only
+    closure check never sees the eventual conflict.
+
+    Checked both ways since scraped restriction data isn't guaranteed to
+    list a pair from both sides.
 
     `context` defaults to locked_codes; pass a wider set (e.g. including
     prior-completed courses) if the caller has one available.
@@ -126,22 +137,22 @@ def would_restriction_conflict(
     course = courses.get(code)
     if course is None:
         return False
-    if course.restrictions & locked_codes:
-        return True
-    for other in locked_codes:
-        other_course = courses.get(other)
-        if other_course and code in other_course.restrictions:
-            return True
 
     closure_context = context if context is not None else locked_codes
-    for forced in forced_prereq_closure(code, closure_context, courses):
-        forced_course = courses.get(forced)
-        if forced_course is None:
+    candidate_group = {code} | forced_prereq_closure(code, closure_context, courses)
+
+    locked_group = set(locked_codes)
+    for other in locked_codes:
+        locked_group |= forced_prereq_closure(other, closure_context, courses)
+
+    for a in candidate_group:
+        a_course = courses.get(a)
+        if a_course is None:
             continue
-        if forced_course.restrictions & locked_codes:
+        if a_course.restrictions & locked_group:
             return True
-        for other in locked_codes:
-            other_course = courses.get(other)
-            if other_course and forced in other_course.restrictions:
+        for b in locked_group:
+            b_course = courses.get(b)
+            if b_course and a in b_course.restrictions:
                 return True
     return False

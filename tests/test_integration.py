@@ -2225,3 +2225,124 @@ def test_select_electives_skips_course_whose_forced_prereq_conflicts():
         "a conflict-free alternative and should have been preferred."
     )
     assert "201" in selected
+
+
+def test_select_electives_checks_conflicts_against_prior_completed():
+    """
+    Regression test: a candidate that conflicts with a course the student
+    already completed is exactly as invalid as one that conflicts with a
+    course this call just selected. _would_force_conflict used to only
+    check against `selected`/`also_avoid_conflicts_with`, not
+    `prior_completed` - a candidate forcing in a restricted prerequisite
+    would pass the check here and only get caught later by
+    DegreeValidator, after the whole plan was already built around it.
+
+    Same shape as test_select_electives_skips_course_whose_forced_prereq_conflicts,
+    but "100" is already completed instead of picked by an earlier pool -
+    isolates prior_completed specifically, since selected/always_include
+    are empty here.
+    """
+    from coursemap.optimisation.search import PlanSearch
+    from coursemap.planner.generator import PlanGenerator
+    from coursemap.domain.course import Course, Offering
+    from coursemap.domain.requirement_nodes import ChooseCreditsRequirement
+    from coursemap.domain.prerequisite import CoursePrerequisite
+
+    d_dis = (Offering(semester="S1", campus="D", mode="DIS"),)
+
+    intro_100 = Course(code="100", title="Intro A", credits=15, level=100,
+                        offerings=d_dis, restrictions=frozenset({"101"}))
+    intro_101 = Course(code="101", title="Intro B", credits=15, level=100,
+                        offerings=d_dis, restrictions=frozenset({"100"}))
+    forces_101 = Course(code="200", title="Needs Intro B", credits=15, level=200,
+                         offerings=d_dis,
+                         prerequisites=CoursePrerequisite(code="101"))
+    safe_alt = Course(code="201", title="No prerequisite", credits=15, level=200,
+                       offerings=d_dis)
+
+    courses = {"100": intro_100, "101": intro_101, "200": forces_101, "201": safe_alt}
+    pool = ChooseCreditsRequirement(credits=15, course_codes=("200", "201"))
+
+    gen = PlanGenerator(courses, campus="D", mode="DIS", start_year=2026, no_summer=True)
+    search = PlanSearch(
+        courses=courses, majors=[], generator_template=gen,
+        prior_completed=frozenset({"100"}), preferred_electives=frozenset(),
+        excluded_courses=frozenset(),
+    )
+
+    selected = search._select_electives([pool], elective_budget=15)
+
+    assert "200" not in selected, (
+        "200 was selected despite its bare prerequisite (101) restricting "
+        "100, which the student already completed - prior_completed must "
+        "be checked, not just newly-selected pool codes."
+    )
+    assert "201" in selected
+
+
+def test_select_electives_checks_locked_codes_own_unresolved_prereq():
+    """
+    Regression test for the deepest layer of this bug class: a course
+    already locked in via always_include can itself carry an unresolved
+    OR prerequisite. Nothing has walked that course's own closure yet -
+    forced_prereq_closure was normally only computed for the fresh
+    candidate being considered, not for codes already sitting in
+    locked_codes. If the candidate's closure conflicts with what an
+    always_include course will ITSELF eventually force in, that's a real
+    conflict invisible unless both sides get expanded.
+
+    Mirrors the real case: 159102 (always_include, OR-requires 159100 or
+    159101) plus candidate 159261 (bare-requires 159101, which restricts
+    159100) - 159100 was never itself "selected", so a candidate-only
+    closure check never saw it coming.
+
+    "102" here plays 159102's role: always_include, OR(100, 101).
+    "200" plays 159261's role: bare-requires 101, and 101 restricts 100.
+    """
+    from coursemap.optimisation.search import PlanSearch
+    from coursemap.planner.generator import PlanGenerator
+    from coursemap.domain.course import Course, Offering
+    from coursemap.domain.requirement_nodes import ChooseCreditsRequirement
+    from coursemap.domain.prerequisite import CoursePrerequisite, OrExpression
+
+    d_dis = (Offering(semester="S1", campus="D", mode="DIS"),)
+
+    intro_100 = Course(code="100", title="Intro A", credits=15, level=100,
+                        offerings=d_dis, restrictions=frozenset({"101"}))
+    intro_101 = Course(code="101", title="Intro B", credits=15, level=100,
+                        offerings=d_dis, restrictions=frozenset({"100"}))
+    always_included = Course(
+        code="102", title="Shared requirement", credits=15, level=100,
+        offerings=d_dis,
+        prerequisites=OrExpression(children=(
+            CoursePrerequisite(code="100"), CoursePrerequisite(code="101"),
+        )),
+    )
+    forces_101 = Course(code="200", title="Needs Intro B", credits=15, level=200,
+                         offerings=d_dis,
+                         prerequisites=CoursePrerequisite(code="101"))
+    safe_alt = Course(code="201", title="No prerequisite", credits=15, level=200,
+                       offerings=d_dis)
+
+    courses = {"100": intro_100, "101": intro_101, "102": always_included,
+               "200": forces_101, "201": safe_alt}
+    pool = ChooseCreditsRequirement(credits=15, course_codes=("200", "201"))
+
+    gen = PlanGenerator(courses, campus="D", mode="DIS", start_year=2026, no_summer=True)
+    search = PlanSearch(
+        courses=courses, majors=[], generator_template=gen,
+        prior_completed=frozenset(), preferred_electives=frozenset(),
+        excluded_courses=frozenset(),
+    )
+
+    selected = search._select_electives(
+        [pool], elective_budget=15, always_include={"102"},
+    )
+
+    assert "200" not in selected, (
+        "200 was selected despite forcing in 101, which restricts 100 - "
+        "100 is what 102 (already locked in via always_include) will "
+        "itself eventually resolve its own OR prerequisite to. Only "
+        "visible if 102's own closure gets expanded too, not just 200's."
+    )
+    assert "201" in selected

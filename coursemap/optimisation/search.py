@@ -1137,14 +1137,19 @@ class PlanSearch:
             """
             True if selecting `code` would restriction-conflict, directly or
             via its forced prerequisite closure, with anything already
-            selected in this call or in `also_avoid_conflicts_with`
-            (required outside this pool selection - e.g. the other major's
-            hard-required courses in a double major). See
-            prerequisite_utils.would_restriction_conflict for the shared
-            logic (also used by ElectiveFiller).
+            selected in this call, in `also_avoid_conflicts_with` (required
+            outside this pool selection - e.g. the other major's
+            hard-required courses in a double major), or already completed
+            by the student. prior_completed must be in the checked set
+            itself, not just in the closure-satisfaction context - a
+            candidate that conflicts with a course the student already
+            completed is exactly as invalid as one that conflicts with a
+            course this same call just selected; both make the plan
+            unenrollable. See prerequisite_utils.would_restriction_conflict
+            for the shared logic (also used by ElectiveFiller).
             """
-            locked = selected | also_avoid_conflicts_with
-            context = locked | always_include | frozenset(self.prior_completed)
+            locked = selected | also_avoid_conflicts_with | frozenset(self.prior_completed)
+            context = locked | always_include
             return would_restriction_conflict(code, locked, self.courses, context)
 
         # ----------------------------------------------------------------
