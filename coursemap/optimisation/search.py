@@ -46,6 +46,7 @@ from coursemap.domain.requirement_utils import (
     collect_course_codes,
     collect_course_node_codes as _shared_collect_course_node_codes,
     collect_elective_nodes,
+    collect_unchosen_any_of_codes,
     find_total_credits,
 )
 from coursemap.domain.prerequisite import (
@@ -62,6 +63,55 @@ from coursemap.rules.degree_rules import filter_requirement_tree as _frt
 logger = logging.getLogger(__name__)
 
 _scorer = PlanScorer()
+
+# Matches both numbering conventions Massey uses for split enrolments
+# (e.g. a 90cr thesis taken as two separate courses): Roman numerals
+# ("Part I", "Part II") and Arabic numerals ("Part 1", "Part 2"). Only
+# Part I/II and Part 1/2 occur in the dataset (no three-part sequences).
+_PART_MARKER_RE = re.compile(r"\bPart\s*(I{1,2}|[0-9]+)\b", re.IGNORECASE)
+
+
+def _part_marker_number(title: str) -> int | None:
+    """1 or 2 if `title` contains a Part 1/I or Part 2/II marker, else None."""
+    m = _PART_MARKER_RE.search(title)
+    if not m:
+        return None
+    token = m.group(1).upper()
+    if token == "I":
+        return 1
+    if token == "II":
+        return 2
+    try:
+        n = int(token)
+    except ValueError:
+        return None
+    return n if n in (1, 2) else None
+
+
+def _part2_partner_code(code1: str, courses: dict[str, Course]) -> str | None:
+    """
+    Return the course code of `code1`'s Part 2, if `code1` is a Part 1 and
+    its partner exists in `courses` and is itself marked Part 2.
+
+    Massey's split-enrolment course pairs (e.g. a 90cr thesis taken as two
+    separately-enrolled courses) are numbered as consecutive codes - the
+    Part 2 code is always the Part 1 code plus one - verified against
+    every such pair in the dataset. This is the reliable pairing signal;
+    title text is NOT, since many unrelated pairs across different
+    subjects share the exact same generic title (e.g. "Thesis 90 Credit"
+    is reused by dozens of distinct code families), so matching by title
+    alone can pair the wrong Part 1 with the wrong Part 2. Credits are
+    also not assumed equal - a few pairs split unevenly (e.g. 30cr Part 1
+    + 60cr Part 2).
+    """
+    course1 = courses.get(code1)
+    if course1 is None or _part_marker_number(course1.title) != 1:
+        return None
+    candidate = str(int(code1) + 1).zfill(len(code1))
+    course2 = courses.get(candidate)
+    if course2 is None or _part_marker_number(course2.title) != 2:
+        return None
+    return candidate
 
 
 def _estimate_chain_cost(
@@ -447,15 +497,20 @@ class PlanSearch:
         enforce_level_progression = qual_level is None or qual_level <= 7
 
         # Step 1: separate required (COURSE nodes) from elective pool codes.
-        # collect_course_codes returns ALL codes in the tree including pool members.
-        # We only schedule pool members that the student actually selects.
+        # collect_course_codes returns ALL codes in the tree including pool
+        # members and every AnyOfRequirement branch. We only schedule pool
+        # members the student actually selects, and only the AnyOfRequirement
+        # branch collect_elective_nodes committed to - the other branch's
+        # codes must not fall through into required_codes just because
+        # pool_codes doesn't claim them either.
         elective_nodes = [
             n for n in collect_elective_nodes(major_req)
             if isinstance(n, ChooseCreditsRequirement)
         ]
         pool_codes: set[str] = {code for n in elective_nodes for code in n.course_codes}
         all_major_codes = collect_course_codes(major_req)
-        required_codes = all_major_codes - pool_codes
+        unchosen_any_of_codes = collect_unchosen_any_of_codes(major_req)
+        required_codes = all_major_codes - pool_codes - unchosen_any_of_codes
 
         # Step 1b: cap required_codes at the degree credit target.
         degree_total = find_total_credits(degree_tree)
@@ -623,24 +678,16 @@ class PlanSearch:
             all_codes_count = len(required_codes | elective_codes)
             if all_codes_count == 0:
                 if self.allow_level_progression_shortfall:
-                    # This is generate_filled_plan's discovery pass, and
-                    # _repair_level_progression's allow_shortfall path
-                    # dropped every pool selection it had (e.g. Finance –
-                    # Bachelor of Business: ALL of its named-pool courses
-                    # are L200/L300 with zero L100 members at all, so the
-                    # L200 gate itself can never be satisfied from the
-                    # named pools, and the cascade drops everything). A
-                    # required_codes-only major (none here) would still
-                    # have something to schedule; an all-pool, all-blocked
-                    # major like this one genuinely has nothing yet, which
-                    # is a valid, if extreme, discovery-pass outcome: it
-                    # just means the WHOLE degree_total becomes the gap for
-                    # generate_filled_plan's filler step to cover, starting
-                    # from open-pool L100 courses. Return an empty-but-valid
-                    # plan rather than raising; the caller computes the gap
-                    # from base_plan.total_credits(), which correctly comes
-                    # out as 0 here, and the real (non-discovery) re-run
-                    # afterward validates at full strictness as normal.
+                    # This is generate_filled_plan's discovery pass. An
+                    # all-pool major whose named pools have no L100 members
+                    # at all (e.g. Finance – Bachelor of Business) can have
+                    # every pool selection dropped by the allow_shortfall
+                    # cascade, leaving nothing to schedule yet - a valid,
+                    # if extreme, discovery-pass outcome. Return an
+                    # empty-but-valid plan rather than raising; the caller
+                    # computes the gap from base_plan.total_credits() (0
+                    # here), and the real re-run afterward validates at
+                    # full strictness as normal.
                     empty_plan = DegreePlan(
                         semesters=(), prior_completed=tuple(
                             self.courses[c] for c in self.prior_completed if c in self.courses
@@ -833,10 +880,9 @@ class PlanSearch:
             # for exactly that reason, not for an unrelated offering/
             # restriction/prerequisite problem. Tolerating "Missing required
             # course X" specifically for those codes, and no others, is what
-            # lets a required course sitting behind a gate neither major's
-            # own courses can ever close on their own get deferred out here
-            # and picked up for real once generate_filled_double_major_plan's
-            # filler step supplies the missing foundation credit.
+            # lets a required course behind an otherwise-unreachable gate be
+            # deferred until generate_filled_double_major_plan supplies the
+            # missing foundation credit.
             deferred_missing = [
                 e for e in result.errors
                 if e.startswith("Missing required course ")
@@ -981,6 +1027,37 @@ class PlanSearch:
                                 stk.extend(n.children)
 
                 protected_trim = (required_codes | always_include_in_pool | non_elective_needed)
+
+                # Pair-aware removal: a course whose code-adjacent partner
+                # identifies it as one half of a Part 1/Part 2 pair (e.g. a
+                # 90cr thesis split into two separately-enrolled courses)
+                # must be removed together with its other half, never
+                # alone - a plan with only "Thesis Part 2" and no "Part 1"
+                # is not something a student could ever actually complete.
+                # If a course's partner is protected or preferred, the
+                # course itself becomes protected too, since removing it
+                # alone would strand its partner.
+                plan_course_by_code = {c.code: c for s in plan.semesters for c in s.courses}
+                pair_of: dict[str, str] = {}
+                for code, course in plan_course_by_code.items():
+                    if code in pair_of or code not in elective_codes or code in protected_trim:
+                        continue
+                    part_num = _part_marker_number(course.title)
+                    if part_num == 1:
+                        partner_code = _part2_partner_code(code, plan_course_by_code)
+                    elif part_num == 2:
+                        candidate = str(int(code) - 1).zfill(len(code))
+                        partner_code = candidate if _part2_partner_code(candidate, plan_course_by_code) == code else None
+                    else:
+                        continue
+                    if partner_code is None or partner_code not in plan_course_by_code:
+                        continue
+                    pair_of[code] = partner_code
+                    pair_of[partner_code] = code
+                for code, partner in pair_of.items():
+                    if partner in protected_trim or partner in preferred_electives:
+                        protected_trim = protected_trim | {code}
+
                 # Pool courses are removable (from end of pool, higher-level first)
                 removable_pool = sorted(
                     [c for s in plan.semesters for c in s.courses
@@ -1006,7 +1083,17 @@ class PlanSearch:
                 for candidate in removable_pool:
                     if remaining_excess <= 0:
                         break
-                    if candidate.code not in removed:
+                    if candidate.code in removed:
+                        continue
+                    partner_code = pair_of.get(candidate.code)
+                    if partner_code and partner_code not in removed:
+                        partner_course = plan_course_by_code.get(partner_code)
+                        removed.add(candidate.code)
+                        removed.add(partner_code)
+                        remaining_excess -= candidate.credits + (
+                            partner_course.credits if partner_course else 0
+                        )
+                    else:
                         removed.add(candidate.code)
                         remaining_excess -= candidate.credits
                 # Pass 2: recompute what's still needed from the SURVIVING
@@ -1183,54 +1270,34 @@ class PlanSearch:
             if accumulated_sched >= effective_target:
                 continue
 
-            # Part I/II pair detection: before greedy sweep, check whether any
-            # pair of courses that are explicitly "Part I" + "Part II" of the same
-            # title meets the credit target. If so, prefer that pair, it avoids
-            # mixing parts from different thesis tracks (e.g. taking the 90cr thesis
-            # Part I alongside the 120cr thesis Part I, which is nonsensical).
-            #
-            # Approach: build (part1, part2) groups from title matching, compute
-            # combined schedulable credits, pick the group with minimum overshoot
-            # that meets the target. If no pair group qualifies, fall through to
-            # the standard greedy loop.
+            # Prefer a single course that exactly closes the remaining gap
+            # over a fragmented multi-course selection, when one exists.
+            # The plain sort order below (offering timing, then level,
+            # then code) has no notion of this - it can just as easily
+            # pick a multi-course combination as a clean single-course
+            # fit, and which one it picks is really just an artifact of
+            # code numbering (e.g. it happened to prefer a standalone 90cr
+            # "Research Report" for one major's thesis pool, but picked a
+            # split 45+45cr Part 1/Part 2 pair over an available
+            # standalone 60cr option for another, purely because of how
+            # the course codes happened to sort - not because either
+            # choice was actually preferred). Checking for an exact fit
+            # first makes that deliberate instead of accidental.
             remaining_needed = effective_target - accumulated_sched
-            best_group: list[str] | None = None
-            best_overshoot = float("inf")
-
-            _part1_re = re.compile(r"\bPart\s*I\b(?!I)", re.IGNORECASE)
-            _part2_re = re.compile(r"\bPart\s*II\b", re.IGNORECASE)
-
-            unselected_sched = [
-                c for c in node.course_codes
-                if c not in selected and c in self.courses and is_schedulable(c)
-            ]
-            part1_candidates = [c for c in unselected_sched
-                                 if _part1_re.search(self.courses[c].title)]
-            for p1 in part1_candidates:
-                cr1 = self.courses[p1].credits
-                # Find a Part II in the same pool with the same credit value.
-                p2_match = next(
-                    (c for c in unselected_sched
-                     if c != p1
-                     and self.courses[c].credits == cr1
-                     and _part2_re.search(self.courses[c].title)),
-                    None,
-                )
-                if p2_match is None:
-                    continue
-                pair_credits = cr1 * 2
-                if pair_credits >= remaining_needed and remaining_needed > 0:
-                    overshoot = pair_credits - remaining_needed
-                    if overshoot < best_overshoot:
-                        best_overshoot = overshoot
-                        best_group = [p1, p2_match]
-
-            if best_group is not None:
-                for code in best_group:
-                    selected.add(code)
-                    if is_schedulable(code):
-                        accumulated_sched += self.courses[code].credits
+            exact_fit = next(
+                (c for c in sorted(node.course_codes, key=_sort_key)
+                 if c not in selected and c in self.courses
+                 and is_schedulable(c)
+                 and self.courses[c].credits == remaining_needed
+                 and not _would_force_conflict(c)),
+                None,
+            )
+            if exact_fit is not None:
+                selected.add(exact_fit)
+                accumulated_sched += self.courses[exact_fit].credits
             else:
+                # Standard greedy sweep: sorted by the pool's normal
+                # preference order (offering timing, then level, then code).
                 sorted_codes = sorted(node.course_codes, key=_sort_key)
                 for code in sorted_codes:
                     if accumulated_sched >= effective_target:
@@ -1246,17 +1313,56 @@ class PlanSearch:
                     if is_schedulable(code):
                         accumulated_sched += course.credits
 
+            # Part 1/2 pair fixup: the greedy sweep above has no notion of
+            # split enrolments (e.g. a 90cr thesis taken as two separately
+            # -enrolled courses), so it can stop as soon as the credit
+            # target is met even if that leaves only one half of such a
+            # pair selected - a course a student could never actually
+            # complete alone. Fix that up here rather than pre-empting the
+            # sweep, so a clean single-course fit (like a standalone 90cr
+            # "Research Report") is still preferred when the pool offers
+            # one, and pairing only kicks in as a safety net.
+            for code in [c for c in node.course_codes if c in selected]:
+                course = self.courses.get(code)
+                if course is None:
+                    continue
+                part_num = _part_marker_number(course.title)
+                if part_num == 1:
+                    partner = _part2_partner_code(code, self.courses)
+                elif part_num == 2:
+                    candidate = str(int(code) - 1).zfill(len(code))
+                    partner = candidate if _part2_partner_code(candidate, self.courses) == code else None
+                else:
+                    continue
+                if (partner and partner in node.course_codes
+                        and partner not in selected and partner in self.courses):
+                    selected.add(partner)
+                    if is_schedulable(partner):
+                        accumulated_sched += self.courses[partner].credits
+
             if accumulated_sched < effective_target and effective_target > 0:
-                # Not enough schedulable courses. Include everything and let
-                # filter_requirement_tree cap the validation target.
+                # Not enough schedulable courses to reach this pool's target
+                # on their own. Include the rest of the pool too so
+                # filter_requirement_tree has the full picture to cap the
+                # validation target against - but still skip anything that
+                # would restriction-conflict with what's already selected.
+                # Without this check, a pool whose only schedulable member
+                # is one half of a mutually-restricted pair (e.g. one
+                # M/INT-only pool candidate reduces the D/DIS-schedulable
+                # total below target) can silently pull in its own
+                # restricted counterpart here, bypassing the same check the
+                # main selection loop above already applies.
+                extra = [
+                    c for c in node.course_codes
+                    if c in self.courses and c not in selected
+                    and not _would_force_conflict(c)
+                ]
                 logger.debug(
                     "Elective pool needs %dcr (effective %dcr) but only %dcr schedulable "
-                    "in %s/%s; including all pool courses.",
-                    node.credits, effective_target, accumulated_sched, campus, mode,
+                    "in %s/%s; including %d additional non-conflicting pool course(s).",
+                    node.credits, effective_target, accumulated_sched, campus, mode, len(extra),
                 )
-                selected.update(
-                    c for c in node.course_codes if c in self.courses
-                )
+                selected.update(extra)
 
             # Update committed_sched so the next pool sees the correct remaining budget.
             committed_sched = _sched_credits(selected)
@@ -1427,7 +1533,7 @@ class PlanSearch:
             as a clear scheduling error.
           - allow_shortfall=True: the unschedulable higher-level selections
             are dropped from the set instead, leaving the affected pool(s)
-            short of their own credit target in this pass.
+            short of their own credit target for this attempt.
 
         always_keep: required (non-pool) codes and always-include codes,
         never removed by the swap (or the allow_shortfall drop), even if
@@ -1449,18 +1555,14 @@ class PlanSearch:
             """
             Sum of unsatisfied credit across every gate, given a level credit
             map. Used to ensure a swap makes real forward progress rather than
-            trading one gate's shortfall for another's (the Psychology
-            oscillation found during development: L100<->L200 swapped back
-            and forth forever, each swap satisfying one gate while exactly
-            re-breaking the other, since Psychology's pool requires L200
-            credit to come from the same 45cr budget as its L100 credit and
-            satisfying the L300-needs-L200 gate and the L200-needs-L100 gate
-            simultaneously needs MORE total pool credit than the pool's own
-            target allows, confirmed mathematically unsolvable earlier this
-            audit). A swap is only accepted if it strictly reduces this total;
-            otherwise it's not real progress and must be rejected, leaving
-            the loop to fall through to the allow_shortfall drop path (or
-            the hard-stop) instead of cycling forever.
+            trading one gate's shortfall for another's - a major whose pool
+            must supply both the L100 and L200 credit a gate needs from the
+            same fixed pool budget can otherwise oscillate forever, each swap
+            satisfying one gate while re-breaking the other. A swap is only
+            accepted if it strictly reduces this total; otherwise it's not
+            real progress and must be rejected, leaving the loop to fall
+            through to the allow_shortfall drop path (or the hard-stop)
+            instead of cycling forever.
             """
             total = 0
             for gated_level, (required, gate_level) in _LEVEL_PROGRESSION_GATE.items():
@@ -1554,11 +1656,8 @@ class PlanSearch:
                     # without a same-pool removal would grow this pool past
                     # its own credit target, which silently breaks downstream
                     # gap/budget accounting that assumes each pool stays at
-                    # its target (see test_filled_plan_reaches_degree_target
-                    # regression hit during development: an earlier version
-                    # of this swap allowed pools to overshoot, which threw
-                    # off generate_filled_plan's gap calculation by exactly
-                    # the overshoot amount). Try the next pool instead.
+                    # its target - see test_filled_plan_reaches_degree_target.
+                    # Try the next pool instead.
                     continue
 
                 for add_code in add_candidates:
@@ -1571,11 +1670,11 @@ class PlanSearch:
 
                         # Tentatively apply the swap and check it actually
                         # makes net progress across ALL gates, not just the
-                        # one we were targeting, otherwise this can oscillate
-                        # forever (Psychology: L100<->L200 swap each fixing
-                        # one gate while re-breaking the other, found during
-                        # development). Reject and try the next candidate if
-                        # the total shortfall doesn't strictly improve.
+                        # one being targeted - a pool that must supply both
+                        # an L100 and an L200 gate from the same budget can
+                        # otherwise oscillate forever. Reject and try the
+                        # next candidate if the total shortfall doesn't
+                        # strictly improve.
                         tentative_level_credits = dict(level_credits)
                         tentative_level_credits[self.courses[drop_code].level] = (
                             tentative_level_credits.get(self.courses[drop_code].level, 0)
@@ -1655,15 +1754,14 @@ class PlanSearch:
                 logger.debug(
                     "Level-progression repair: no in-pool swap available to "
                     "cover a %dcr shortfall at L%d; major may be genuinely "
-                    "unsolvable from its named pools alone. (An open/free-"
+                    "unsolvable from its named pools alone. An open/free-"
                     "elective pool, if present, is deliberately NOT used as "
-                    "a fallback source here, confirmed via Finance "
-                    "Bachelor of Business during development that doing so "
-                    "breaks generate_filled_plan's two-pass architecture: "
-                    "open-pool additions made during the base-plan repair "
-                    "aren't tracked in major_pool_codes, so the base-plan "
-                    "and filled-plan passes can independently make different "
-                    "repair choices and net out short of the degree total.)",
+                    "a fallback source here: open-pool additions made during "
+                    "the base-plan repair aren't tracked in major_pool_codes, "
+                    "so the base-plan and filled-plan passes in "
+                    "generate_filled_plan's two-pass architecture can "
+                    "independently make different repair choices and net "
+                    "out short of the degree total.",
                     shortfall_amount, shortfall_gate_level,
                 )
                 break

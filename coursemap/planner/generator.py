@@ -272,17 +272,15 @@ class PlanGenerator:
         # Pre-completed courses are excluded from scheduling but seed the
         # completed set so their codes satisfy prerequisite checks.
         # Zero-credit ELECTIVE/pool courses (practicums, language enrollments)
-        # are non-schedulable and must never enter the remaining set. They
-        # would deadlock the scheduler's credit-cap and rebalancing math,
-        # which assumes positive course weights. Zero-credit courses that are
-        # directly REQUIRED (e.g. a pass/fail competency exam like Braille
-        # Proficiency in Specialist Teaching programmes) are real,
-        # schedulable requirements, not data noise. Excluding them
-        # unconditionally caused several majors to have NO valid plan at
-        # ANY campus/mode combination, since the validator correctly
-        # expected a course the scheduler had silently made impossible to
-        # ever place. required_zero_credit_codes carries the specific
-        # codes that are safe to include despite having zero credits.
+        # are non-schedulable and must never enter the remaining set - they'd
+        # deadlock the scheduler's credit-cap and rebalancing math, which
+        # assumes positive course weights. Zero-credit courses that are
+        # directly REQUIRED (e.g. a pass/fail competency exam) are real,
+        # schedulable requirements, not data noise - excluding them
+        # unconditionally leaves some majors with no valid plan at any
+        # campus/mode, since the validator expects a course the scheduler
+        # made impossible to place. required_zero_credit_codes carries the
+        # specific codes that are safe to include despite zero credits.
         remaining: set[str] = {
             code for code in self.courses.keys()
             if code not in self.prior_completed
@@ -679,7 +677,7 @@ class PlanGenerator:
         # load staircases that the greedy pass creates when prerequisites unlock
         # a large batch all at once.
         #
-        # IMPORTANT: this pass only operates on semesters [0..n-2].  The final
+        # IMPORTANT: equalisation only operates on semesters [0..n-2]. The final
         # semester was already tuned by Pass 1-3 above; touching it here would
         # undo that work.
         equalise_moves = self._equalise(result)

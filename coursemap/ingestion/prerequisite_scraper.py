@@ -642,6 +642,13 @@ def scrape_course_relations(
         if include_diagnostics:
             result["_status_code"] = None
             result["_content_length"] = 0
+            # Surfaced up to _fetch_relations' WARNING-level log so an
+            # operator watching a normal run can tell a timeout apart from
+            # a connection error apart from a bug in this function itself,
+            # instead of every request-level failure looking identically
+            # opaque ("status=None, content_length=0") unless they happen
+            # to be running with debug logging enabled.
+            result["_error"] = f"{type(exc).__name__}: {exc}"
         return result
 
 

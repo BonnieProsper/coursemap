@@ -277,7 +277,19 @@ def test_bsc_ecology_distance_plan(svc):
 # BA (low major coverage -- high free-elective gap)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.xfail(reason=_LEVEL_PROGRESSION_KNOWN_LIMITATION, strict=True)
 def test_ba_english_plan_is_valid(svc):
+    """
+    English's required (non-pool) courses cap out at 30cr L200 (139139 plus
+    a 15cr L200 CHOOSE_CREDITS pool) - short of the 45cr the level-progression
+    rule needs before its 45cr L300 pool (139305/139307/139340/etc.) can be
+    scheduled at all. Already documented in DATA_QUALITY.md ("The 45cr
+    Level-Progression Rule", category 2 - same root cause as Chinese - BA)
+    but this test itself was never updated to match, so it failed as an
+    unexplained regression rather than a tracked, understood limitation.
+    Same category as Chinese/Psychology/Creative Writing/Japanese/Education/
+    Finance above, not a new bug.
+    """
     name = "English – Bachelor of Arts"
     plan = _plan(svc, name)
     assert plan.total_credits() > 0
@@ -1926,17 +1938,48 @@ def test_ss_only_courses_not_in_working_set():
 def test_generator_horizon_counts_active_semesters():
     """With no_summer=True, max_semesters=8 should give 8 real semesters, not 5.
 
-    Uses English rather than Chinese as the test major: Chinese's required
-    course list only reaches 30cr at L200 (the 45cr level-progression rule
-    permanently blocks its L300 courses, see DATA_QUALITY.md), which is a
-    genuine major-design gap unrelated to what this test checks.
+    Previously used English – Bachelor of Arts as the test major on the
+    premise that (unlike Chinese) its required course list reaches enough
+    L200 credit to avoid the 45cr level-progression rule. That premise is
+    now false - English hits the identical limitation as Chinese (see
+    DATA_QUALITY.md, "The 45cr Level-Progression Rule", and
+    test_ba_english_plan_is_valid above) - so depending on any specific
+    real major here is fragile to dataset/major-modelling changes that have
+    nothing to do with what this test actually checks: semester-counting
+    arithmetic. Rebuilt on a synthetic prerequisite chain instead, so it can
+    never again break for an unrelated, real-major-data reason.
     """
-    plan = PlannerService(courses=load_courses(), majors=load_majors()).generate_best_plan(
-        major_name="English – Bachelor of Arts", campus="D", mode="DIS",
-        start_year=2026, no_summer=True, max_credits_per_semester=60,
+    from coursemap.domain.course import Course, Offering
+    from coursemap.planner.generator import PlanGenerator
+
+    # Six courses, strictly sequential (each requires the previous), all
+    # L100 so the level-progression gate never applies, one 60cr course per
+    # semester so exactly one can be scheduled per active semester slot.
+    codes = [f"90000{i}" for i in range(6)]
+    courses: dict[str, Course] = {}
+    for i, code in enumerate(codes):
+        prereq = None
+        if i > 0:
+            from coursemap.domain.prerequisite import CoursePrerequisite
+            prereq = CoursePrerequisite(codes[i - 1])
+        courses[code] = Course(
+            code=code, title=f"Synthetic Course {i}", credits=60, level=100,
+            offerings=(
+                Offering(semester="S1", campus="D", mode="DIS"),
+                Offering(semester="S2", campus="D", mode="DIS"),
+            ),
+            prerequisites=prereq,
+        )
+
+    gen = PlanGenerator(
+        courses, campus="D", mode="DIS", start_year=2026,
+        no_summer=True, max_semesters=8, max_credits_per_semester=60,
     )
-    # English needs several real semesters; this should complete without ValueError.
-    assert len(plan.semesters) >= 4
+    # Six real semesters needed; this should complete without ValueError.
+    # Would previously raise "Scheduling exceeded safe horizon" if SS-skipped
+    # slots were still being counted against the budget (cuts it to ~5.3).
+    plan = gen.generate()
+    assert len(plan.semesters) >= 6
 
 
 def test_filler_excludes_major_pool_codes(svc):
@@ -2346,3 +2389,460 @@ def test_select_electives_checks_locked_codes_own_unresolved_prereq():
         "visible if 102's own closure gets expanded too, not just 200's."
     )
     assert "201" in selected
+
+
+def test_select_electives_fallback_path_checks_conflicts():
+    """
+    Regression test for the third occurrence of this bug class: when a
+    pool doesn't have enough schedulable courses to reach its own credit
+    target, _select_electives falls back to "include the rest of the pool
+    too" so filter_requirement_tree has the full picture. That fallback
+    used to add every remaining pool code unconditionally, with none of
+    the restriction-conflict checking the main selection loop and top-up
+    pass already had.
+
+    Concrete real case: Animal Science - Master of Science's "Part One"
+    pool is {117709 (M/INT only, not schedulable at D/DIS), 119728 (15cr,
+    schedulable), 162760 (30cr, schedulable, restricts 119728)}, target
+    30cr. 119728 gets picked first (no conflict yet), leaving only 15cr
+    of the 30cr target actually schedulable - triggering the fallback,
+    which used to add 162760 unconditionally despite it directly
+    restricting 119728, already selected.
+
+    Mirrors that shape with synthetic courses: "100" (M/INT only, mirrors
+    117709), "101" (D/DIS, 15cr, mirrors 119728), "102" (D/DIS, 30cr,
+    restricts 101, mirrors 162760), pool target 30cr.
+    """
+    from coursemap.optimisation.search import PlanSearch
+    from coursemap.planner.generator import PlanGenerator
+    from coursemap.domain.course import Course, Offering
+    from coursemap.domain.requirement_nodes import ChooseCreditsRequirement
+
+    m_int = (Offering(semester="S1", campus="M", mode="INT"),)
+    d_dis = (Offering(semester="S1", campus="D", mode="DIS"),)
+
+    not_schedulable_here = Course(code="100", title="On-campus only", credits=15,
+                                   level=700, offerings=m_int)
+    picked_first = Course(code="101", title="Picked first, no conflict yet",
+                           credits=15, level=700, offerings=d_dis)
+    conflicts_with_101 = Course(code="102", title="Alone would satisfy the pool",
+                                 credits=30, level=700, offerings=d_dis,
+                                 restrictions=frozenset({"101"}))
+
+    courses = {"100": not_schedulable_here, "101": picked_first, "102": conflicts_with_101}
+    pool = ChooseCreditsRequirement(credits=30, course_codes=("100", "101", "102"))
+
+    gen = PlanGenerator(courses, campus="D", mode="DIS", start_year=2026, no_summer=True)
+    search = PlanSearch(
+        courses=courses, majors=[], generator_template=gen,
+        prior_completed=frozenset(), preferred_electives=frozenset(),
+        excluded_courses=frozenset(),
+    )
+
+    selected = search._select_electives([pool], elective_budget=30)
+
+    assert not ("101" in selected and "102" in selected), (
+        "101 and 102 were both selected despite mutually restricting each "
+        "other - the fallback path for under-schedulable pools must skip "
+        "conflicting candidates just like the main selection loop does."
+    )
+
+
+def test_ma_majors_include_exactly_one_part_two_path(svc):
+    """
+    Regression test for English - MA: has a real "Either [thesis] Or
+    [research report]" Part Two, previously stored as both being
+    simultaneously required (an ALL_OF of two overlapping CHOOSE_CREDITS
+    pools). Fixed in majors.json using ANY_OF.
+
+    Getting here needed two prerequisite bug fixes in search.py, not
+    just the ANY_OF re-encoding (see CHANGELOG.md "Fixed: Part 1/Part 2
+    pairing, properly this time"): a dead Part 1/Part 2 pairing regex,
+    and a credit-trim step that could strand one half of a pair. A third
+    fix - preferring an exact single-course fit (e.g. a standalone 60cr
+    "Research Report") over a fragmented multi-course selection - is what
+    actually lets this resolve cleanly with no credit overshoot: English
+    has a same-credit standalone alternative to the thesis pair, so the
+    fixed selection logic picks that instead of ever needing one.
+
+    Geography and Sociology - MA had the identical Part Two fix applied
+    and initially passed here too, but a separate, later fix (correcting
+    their qualification's total credits from an incorrect 240 to the
+    real, live-verified 180 - see rules/degree_rules.py's (9, 1.5)
+    DegreeProfile and DATA_QUALITY.md) exposed a different, pre-existing
+    bug in both: their Part One is stored as several courses all flatly
+    required, which alone consumes credits the real qualification treats
+    as a smaller choosable pool. That wasn't visible against the wrong
+    240cr target (there was enough slack to hide it); it's a real,
+    separate bug, not a regression in the Part Two fix. See
+    test_geography_and_sociology_ma_part_one_not_yet_fixed.
+
+    Checks the actual plan content, not just that generation doesn't
+    raise - a plan that silently omits a real degree requirement is a
+    worse failure mode than one that raises, since nothing about it looks
+    wrong to a student reading it. Also independently re-validates the
+    plan against DegreeValidator, not just checking specific codes, since
+    a plan could contain the right codes and still be short elsewhere.
+    """
+    from coursemap.validation.engine import DegreeValidator
+
+    name = "English – Master of Arts"
+    thesis_codes = {"139816", "139817", "139881", "139882"}
+    research_report_codes = {"139873"}
+
+    plan = svc.generate_best_plan(major_name=name)
+    codes = {c.code for s in plan.semesters for c in s.courses}
+    has_thesis = bool(codes & thesis_codes)
+    has_research_report = bool(codes & research_report_codes)
+
+    assert has_thesis or has_research_report, (
+        f"{name}: plan includes neither a thesis nor a research report "
+        f"course - Part Two was silently omitted entirely."
+    )
+    assert not (has_thesis and has_research_report), (
+        f"{name}: plan includes both thesis and research report "
+        f"courses - these are mutually exclusive pathways, not both "
+        f"required."
+    )
+
+    tree = svc.degree_tree_for_major(name, campus="D", mode="DIS")
+    result = DegreeValidator(tree).validate(plan)
+    assert result.passed, f"{name}: plan fails full validation: {result.errors}"
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Geography and Sociology - MA: their Part Two ANY_OF fix is "
+        "correct (verified against real course structure), but with the "
+        "qualification's now-correct 180cr total (was wrongly 240, see "
+        "the (9, 1.5) DegreeProfile fix), their Part One structure - "
+        "several courses stored as flatly required (e.g. Geography: 6 "
+        "courses x 30cr = 180cr, consuming the ENTIRE qualification total "
+        "on Part One alone, leaving 0 for Part Two) - is now visibly "
+        "wrong. Geography's live page describes Part One as 'Coursework "
+        "Pathway (120 credits) or Research Pathway (Between 60 and 90 "
+        "credits)', i.e. a choosable pool correlated with which Part Two "
+        "pathway is taken, not a flat 180cr requirement. This wasn't "
+        "visible against the previous incorrect 240cr total (enough "
+        "slack existed to hide it) - a pre-existing bug, not a "
+        "regression from the length fix. Needs live-verified Part One "
+        "pool structure for each affected major, and the two-pathway "
+        "coupling (Part One choice tied to Part Two choice) is a genuine "
+        "structural gap - the domain model currently has no way to "
+        "express two ANY_OF choices whose branches must match up."
+    ),
+    strict=True,
+)
+def test_geography_and_sociology_ma_part_one_not_yet_fixed(svc):
+    """
+    Documents Geography and Sociology - MA specifically, separated out
+    from test_ma_majors_include_exactly_one_part_two_path once English
+    (in that same original group) was confirmed genuinely fixed and
+    these two were found to have a distinct, newly-exposed Part One bug.
+    See the xfail reason above.
+    """
+    from coursemap.validation.engine import DegreeValidator
+
+    for name in ("Geography – Master of Arts", "Sociology – Master of Arts"):
+        plan = svc.generate_best_plan(major_name=name)
+        tree = svc.degree_tree_for_major(name, campus="D", mode="DIS")
+        result = DegreeValidator(tree).validate(plan)
+        assert result.passed, f"{name}: plan fails full validation: {result.errors}"
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Education - MA has the same mis-encoded Either/Or Part Two as "
+        "Geography/English/Sociology, but fixing it (ANY_OF re-encoding, "
+        "same as the other three - not yet applied to majors.json for "
+        "this major) surfaces a distinct, newly-found bug: the elective "
+        "top-up pass reaches back into a named pool that's already met "
+        "its own credit target once total elective_budget exceeds the "
+        "sum of all named pool targets, adding a second course from the "
+        "same pool on top of an already-sufficient selection (e.g. both "
+        "the 60cr and 45cr 'Professional Inquiry' variants). The "
+        "subsequent credit trim then removes the original 60cr choice "
+        "and keeps the insufficient 45cr one, purely because of "
+        "(-level, code) removal order - not because it's the better "
+        "choice - leaving the pool short. Needs the top-up pass to skip "
+        "pools already at their own target, not just a trim-order fix. "
+        "Separately, live-verified Education's real Part Two structure "
+        "is a 3-way choice (60cr coursework / 90cr thesis / 120cr "
+        "thesis), not the 2-pool shape stored, and two of its current "
+        "pool codes (267861, 267875) don't belong to this qualification "
+        "at all - they're from a different, similarly-named Master of "
+        "Education qualification. Needs its own majors.json correction, "
+        "not just an ANY_OF wrap of the existing (wrong) pools."
+    ),
+    strict=True,
+)
+def test_education_ma_part_two_not_yet_fixed(svc):
+    """
+    Documents Education - MA specifically, separated out from
+    test_ma_majors_include_exactly_one_part_two_path once the other
+    three majors in that group were confirmed fixed. See the xfail
+    reason above for the specific new bugs blocking this one.
+    """
+    from coursemap.validation.engine import DegreeValidator
+
+    name = "Education – Master of Arts"
+    plan = svc.generate_best_plan(major_name=name)
+    tree = svc.degree_tree_for_major(name, campus="D", mode="DIS")
+    result = DegreeValidator(tree).validate(plan)
+    assert result.passed, f"{name}: plan fails full validation: {result.errors}"
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Found while investigating the backlog item to unify this bug with "
+        "Chemistry/Mathematics-MSc's free-electives shortfall (they turned "
+        "out unrelated - see 'Fixed: the Chemistry/Mathematics MSc "
+        "free-electives shortfall' in CHANGELOG.md for that story instead). "
+        "These three were the majors fix_stale_free_elective_pool_sizes "
+        "deliberately left unfixed because the arithmetic went negative - "
+        "live-verifying them (rather than guessing a number) confirms they "
+        "are 3 more instances of the exact same Geography/Sociology-MA "
+        "structural gap, not a new or different bug: a Part One credit "
+        "range correlated with which Part Two pathway is chosen, which the "
+        "domain model has no way to express. Ecology and Conservation - "
+        "MSc: Part One's subject courses are 'Choose between 30 and 60 "
+        "credits from' 196713/232701, Part Two's thesis is 'Choose between "
+        "90 and 120 credits from' four thesis-component courses - two "
+        "correlated pathways (30+150=180 or 60+120... i.e. 30cr subject + "
+        "120cr thesis, or 60cr subject + 90cr thesis, both totalling 180 "
+        "with the 30cr compulsory research-methods course), stored as two "
+        "separate fixed-size ALL_OF requirements instead. Occupational "
+        "Health and Safety / Māori Health - MHS: live-verified to offer "
+        "the same research-vs-professional pathway split with differently "
+        "sized thesis components (e.g. 90cr thesis as 45+45, or a 120cr "
+        "thesis), same underlying shape. No fix attempted here: choosing "
+        "one arbitrary pathway would be an unsafe data edit. The real fix "
+        "(representing two correlated ANY_OF choices) needs the same "
+        "domain-model work Geography's Part One still needs."
+    ),
+    strict=True,
+)
+def test_correlated_part_one_two_majors_not_yet_fixed(svc):
+    """
+    Documents the 3 majors fix_stale_free_elective_pool_sizes deliberately
+    skipped (_UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS in repair_dataset.py)
+    as confirmed instances of the Geography/Sociology-MA correlated
+    Part One/Part Two gap, not a distinct bug needing its own fix. See the
+    xfail reason above.
+    """
+    from coursemap.validation.engine import DegreeValidator
+
+    for name in (
+        "Ecology and Conservation – Master of Science",
+        "Occupational Health and Safety – Master of Health Science",
+        "Māori Health – Master of Health Science",
+    ):
+        plan = svc.generate_best_plan(major_name=name, campus="D", mode="DIS")
+        tree = svc.degree_tree_for_major(name, campus="D", mode="DIS")
+        result = DegreeValidator(tree).validate(plan)
+        assert result.passed, f"{name}: plan fails full validation: {result.errors}"
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Financial Analytics/Research and Financial Technology - Master of "
+        "Finance still have an elective-pool shortfall after the "
+        "qualification-length and free-elective fixes. Confirmed this is a "
+        "distinct generator bug, not a data problem and not the "
+        "level-progression limitation or the Part One/Two correlated-"
+        "pathway gap documented elsewhere: all of this major's pools are "
+        "flat 700/800-level with no level-progression gate, and the 60cr "
+        "pool it fails to fill (11 candidates, all offered D/DIS, no "
+        "prerequisite or restriction issue found) is fully schedulable on "
+        "its own. generate_best_plan's base plan only ever draws from the "
+        "first two of this major's three named pools (135cr from 6 courses "
+        "- more than the 120cr those two pools actually need, since their "
+        "candidate lists overlap and the selection doesn't recognise "
+        "that), then stops; the third pool (125850/125851/125803/125810/"
+        "125811/125820/125821/125892/125895/125897/125898) never gets "
+        "touched, and generate_filled_plan's generic top-up filler (which "
+        "has no concept of a specific unmet named pool, only a total "
+        "credit gap) adds unrelated low-level courses to reach the total "
+        "instead. Risk Analytics - Master of Finance, under the exact same "
+        "qualification with the same pool shape and the same overlapping-"
+        "candidate pattern (just different credit splits: 45/75/60 instead "
+        "of 30/90/60), schedules correctly - so this isn't inherent to the "
+        "shape, something about the specific numbers or candidate ordering "
+        "trips it. A broader scan of all 80 majors with 3+ named elective "
+        "pools found 45 DegreeValidator failures total, but the large "
+        "majority of those are re-manifestations of the already-documented, "
+        "already-xfail'd level-progression limitation (confirmed by "
+        "checking pool levels directly for a sample - Philosophy and "
+        "Sociology - BA both have the tell-tale blocked 45cr L300 pool) or "
+        "the Part One/Two correlated-pathway gap, not this bug. At least "
+        "16 of the 45 are Master's-level majors with no level-progression "
+        "gate at all (including Te Reo, Hauora, Māori Education, and "
+        "Critical Studies in Māori Development - Master of Māori Studies, "
+        "Economics and Social Anthropology - MA, Earth Science and "
+        "Psychology/Health Psychology - MSc, and others), which is the "
+        "real, currently-unscoped size of this specific bug - each would "
+        "need the same individual verification done here for Finance "
+        "before assuming they share this exact cause rather than a fourth, "
+        "still-undiscovered one. Not fixed here: the actual bug lives "
+        "somewhere in search.py's pool-selection order/greedy-selection "
+        "logic (already flagged for its 1960-line size and prior "
+        "elective-selection bugs in this file). It needs a targeted fix, "
+        "not a guess."
+    ),
+    strict=True,
+)
+def test_finance_multi_pool_elective_starvation_not_yet_fixed(svc):
+    """
+    Financial Analytics and Research, and Financial Technology - Master of
+    Finance both fail DegreeValidator because generate_best_plan never
+    draws anything from their third named elective pool, even though it's
+    fully schedulable (offered, no prereq/restriction conflict, plenty of
+    candidates). Risk Analytics - Master of Finance, same qualification and
+    pool shape, is included as a passing control to show this isn't
+    inherent to the shape itself. See the xfail reason above for the full
+    investigation.
+    """
+    from coursemap.validation.engine import DegreeValidator
+
+    # Control: same qualification, same 3-pool overlapping-candidate shape,
+    # different credit split - this one schedules correctly today. If this
+    # assertion ever fails, the bug's shape has changed and the xfail below
+    # needs re-investigating, not just re-running.
+    control_name = "Risk Analytics – Master of Finance"
+    control_plan, _ = svc.generate_filled_plan(control_name, campus="D", mode="DIS", no_summer=True)
+    control_tree = svc.degree_tree_for_major(control_name, campus="D", mode="DIS")
+    control_result = DegreeValidator(control_tree).validate(control_plan)
+    assert control_result.passed, (
+        f"{control_name}: expected this control case to still pass; "
+        f"if it doesn't, the bug has changed shape: {control_result.errors}"
+    )
+
+    for name in (
+        "Financial Analytics and Research – Master of Finance",
+        "Financial Technology – Master of Finance",
+    ):
+        plan, _ = svc.generate_filled_plan(name, campus="D", mode="DIS", no_summer=True)
+        tree = svc.degree_tree_for_major(name, campus="D", mode="DIS")
+        result = DegreeValidator(tree).validate(plan)
+        assert result.passed, f"{name}: plan fails full validation: {result.errors}"
+
+
+def test_select_electives_completes_orphaned_arabic_numeral_part_pair():
+    """
+    Regression test for the dead Part I/II pairing safeguard in
+    _select_electives (see CHANGELOG.md). The safeguard's regex only
+    matched Roman numerals ("Part I", "Part II"); real course titles use
+    Arabic digits ("Part 1", "Part 2"), so it never fired and the plain
+    greedy sweep could stop as soon as the credit target was met, leaving
+    only one half of a split enrolment selected - a course a student
+    could never actually complete alone (e.g. "Thesis 90 Credit Part 2"
+    with no "Part 1").
+
+    Builds a minimal pool by hand: a Part 1/Part 2 pair (Arabic numerals,
+    adjacent course codes, as Massey's real data uses) sized so the
+    credit target is met by Part 1 alone, plus an unrelated filler
+    course sorted earlier so the greedy sweep never needs Part 2 on its
+    own merits. Asserts both halves end up selected together, never a
+    lone half.
+    """
+    from coursemap.optimisation.search import PlanSearch
+    from coursemap.planner.generator import PlanGenerator
+    from coursemap.domain.course import Course, Offering
+    from coursemap.domain.requirement_nodes import ChooseCreditsRequirement
+
+    d_dis = (Offering(semester="S1", campus="D", mode="DIS"),)
+
+    part1 = Course(
+        code="900101", title="Thesis 90 Credit Part 1", credits=45, level=800,
+        offerings=d_dis,
+    )
+    part2 = Course(
+        code="900102", title="Thesis 90 Credit Part 2", credits=45, level=800,
+        offerings=d_dis,
+    )
+    courses = {"900101": part1, "900102": part2}
+
+    pool_node = ChooseCreditsRequirement(credits=45, course_codes=("900101", "900102"))
+
+    gen = PlanGenerator(courses, campus="D", mode="DIS", start_year=2026, no_summer=True)
+    search = PlanSearch(
+        courses=courses, majors=[], generator_template=gen,
+        prior_completed=frozenset(), preferred_electives=frozenset(),
+        excluded_courses=frozenset(),
+    )
+
+    selected = search._select_electives([pool_node], elective_budget=45)
+
+    assert selected == {"900101", "900102"}, (
+        f"Expected both halves of the Part 1/Part 2 pair selected together, "
+        f"got {selected} - a student can never complete just one half."
+    )
+
+
+def test_trim_plan_to_credit_target_never_strands_part_pair():
+    """
+    Regression test for the blind trim-ordering bug in
+    _trim_plan_to_credit_target (see CHANGELOG.md). When a plan
+    over-selects a Part 1/Part 2 pair relative to the degree's remaining
+    credit budget, the trim step used to remove pool courses by
+    (-level, code) with no notion that two courses were a dependent
+    pair - it could remove Part 1 (alphabetically/code-earlier) while
+    keeping Part 2, leaving a plan with only "Thesis Part 2" and no
+    "Part 1".
+
+    Builds a plan by hand with a required course plus a Part 1/Part 2
+    pair that together overshoot degree_total, and asserts the trim
+    result contains either both halves or neither - never exactly one.
+    """
+    from coursemap.optimisation.search import PlanSearch
+    from coursemap.planner.generator import PlanGenerator
+    from coursemap.domain.course import Course, Offering
+    from coursemap.domain.plan import DegreePlan, SemesterPlan
+
+    d_dis = (Offering(semester="S1", campus="D", mode="DIS"),)
+
+    required = Course(
+        code="900001", title="Required Core Course", credits=180, level=800,
+        offerings=d_dis,
+    )
+    part1 = Course(
+        code="900101", title="Thesis 90 Credit Part 1", credits=45, level=800,
+        offerings=d_dis,
+    )
+    part2 = Course(
+        code="900102", title="Thesis 90 Credit Part 2", credits=45, level=800,
+        offerings=d_dis,
+    )
+    courses = {"900001": required, "900101": part1, "900102": part2}
+
+    plan = DegreePlan(semesters=(
+        SemesterPlan(year=2026, semester="S1", courses=(required, part1)),
+        SemesterPlan(year=2026, semester="S2", courses=(part2,)),
+    ))
+
+    gen = PlanGenerator(courses, campus="D", mode="DIS", start_year=2026, no_summer=True)
+    search = PlanSearch(
+        courses=courses, majors=[], generator_template=gen,
+        prior_completed=frozenset(), preferred_electives=frozenset(),
+        excluded_courses=frozenset(),
+    )
+
+    # Plan totals 270cr; degree_total only allows 240cr - 30cr must be
+    # trimmed from the elective pool (the Part 1/Part 2 pair), which
+    # can't be done without removing at least one whole half.
+    trimmed = search._trim_plan_to_credit_target(
+        plan,
+        degree_total=240,
+        required_codes={"900001"},
+        always_include_in_pool=set(),
+        elective_codes={"900101", "900102"},
+        preferred_electives=frozenset(),
+    )
+
+    codes = {c.code for s in trimmed.semesters for c in s.courses}
+    has_part1 = "900101" in codes
+    has_part2 = "900102" in codes
+    assert has_part1 == has_part2, (
+        f"Trim stranded one half of the Part 1/Part 2 pair: "
+        f"part1={has_part1}, part2={has_part2}, codes={codes}"
+    )

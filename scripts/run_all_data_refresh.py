@@ -14,6 +14,10 @@ Or run them separately (recommended so you can check each step):
 import subprocess, sys, time
 from pathlib import Path
 
+if "-h" in sys.argv or "--help" in sys.argv:
+    print(__doc__)
+    raise SystemExit(0)
+
 ROOT = Path(__file__).resolve().parents[1]
 
 def run(cmd, desc):

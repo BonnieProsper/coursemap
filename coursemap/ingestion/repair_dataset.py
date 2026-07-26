@@ -86,7 +86,7 @@ def repair_prereqs(courses: list[dict]) -> tuple[list[dict], dict]:
         raw_prereqs = c.get("prerequisites")
 
         if raw_prereqs is None or isinstance(raw_prereqs, (str, dict)):
-            # Already structured (or genuinely empty) -- not this pass's job.
+            # Already structured, or genuinely empty.
             stats["already_structured"] += 1
             out.append(c)
             continue
@@ -453,6 +453,32 @@ _VERIFIED_PREREQ_FIXES: dict[str, dict | str] = {
             {"op": "OR", "args": ["160101", "160102", "160105", "160132", "160133"]},
         ],
     },
+
+    # The following four were all stored as flat ANDs of every code
+    # across all clauses - the same bug as 160212/123201 above, each
+    # confirmed a genuine restriction conflict (two of the required
+    # codes mutually restrict each other, impossible as scraped). All
+    # four real requirements are plain "one of" lists, live-verified.
+
+    # 117226 Performance Animal Nutrition.
+    # https://www.massey.ac.nz/study/courses/performance-animal-nutrition-117226/
+    # "One of 117152, 117153, 117155 or 194101"
+    "117226": {"op": "OR", "args": ["117152", "117153", "117155", "194101"]},
+
+    # 117243 Animal Reproduction and Lactation in Livestock.
+    # https://www.massey.ac.nz/study/courses/animal-reproduction-and-lactation-in-livestock-117243/
+    # "One of 117153, 117155 or 194101"
+    "117243": {"op": "OR", "args": ["117153", "117155", "194101"]},
+
+    # 120303 Plant Diversity.
+    # https://www.massey.ac.nz/study/courses/plant-diversity-120303/
+    # "One of (120201, 120218, 120219, 196205, 196207 or 203210)"
+    "120303": {"op": "OR", "args": ["120201", "120218", "120219", "196205", "196207", "203210"]},
+
+    # 286321 Responses to Training in the Equine Athlete.
+    # https://www.massey.ac.nz/study/courses/responses-to-training-in-the-equine-athlete-286321/
+    # "One of 117152, 117153, 117155 or 194101"
+    "286321": {"op": "OR", "args": ["117152", "117153", "117155", "194101"]},
 }
 
 
@@ -479,6 +505,285 @@ def apply_verified_prereq_fixes(courses: list[dict]) -> tuple[list[dict], int]:
 
 
 # ── CREDIT / LEVEL NORMALISATION ───────────────────────────────────────────────
+
+# Massey's Swiftype `qual_length` field (scraped into qualifications.json's
+# `length`) is a coarse duration category from Massey's own backend, not a
+# precise total-credits proxy - the rest of this codebase assumes
+# total_credits = length * 120 (see rules/degree_rules.py's DegreeProfile
+# table), which breaks for any qualification whose real total isn't a whole
+# number of years. Every one of the 47 Level-9 (Master's) qualifications in
+# qualifications.json reports length=2 except a handful explicitly marked 1
+# year - which is itself a strong signal that `qual_length` is a rounded/
+# bucketed category (probably "up to N years"), not a literal figure, for at
+# least some of them. Only the entries below have actually been checked
+# against a live subject page; the other ~40 Level-9 entries have NOT been
+# verified either way and may or may not be affected - see DATA_QUALITY.md.
+_VERIFIED_QUALIFICATION_LENGTH_FIXES: dict[str, float] = {
+    # PMART Master of Arts. Stored as length=2 (implying 240cr via the
+    # length*120 default). Real: 180cr / "3 semesters of full-time study"
+    # (https://www.massey.ac.nz/study/all-qualifications-and-degrees/master-of-arts-PMART/geography-PMART1SGGRP1/
+    # and .../education-PMART1SEDCT1/, both state, word for word: "Massey's
+    # Master of Arts is 180 credits. This means you can complete an MA in 3
+    # semesters of full-time study."). 1.5 years, not 2. Requires a matching
+    # (9, 1.5) entry in rules/degree_rules.py's _DEGREE_PROFILES, which
+    # exists.
+    "PMART": 1.5,
+    # PMSCN Master of Science. Stored as length=2 (240cr). Real, per its own
+    # qualification page: "Massey University's Master of Science is a
+    # 180-credit master qualification (a 240-credit MSc is also available)."
+    # (https://www.massey.ac.nz/study/all-qualifications-and-degrees/master-of-science-PMSCN/)
+    # 180cr is the standard/headline qualification; 240cr is a real but
+    # separate, alternate pathway the planner has no way to ask the
+    # student about or select between (no pathway-choice input exists
+    # anywhere in the planner). Defaulting to 180cr matches every subject
+    # page checked so far (Chemistry, Mathematics, Animal Science,
+    # Agricultural Science, Biological Sciences - all describe the
+    # identical Part One (60cr) -> Part Two (120cr thesis) = 180cr
+    # structure), and is consistent with the qualification's own official
+    # regulations page. Requires the same (9, 1.5) DegreeProfile entry as
+    # PMART.
+    "PMSCN": 1.5,
+    # The four below were found via a systematic sweep of the qualification
+    # regulations pages (https://www.massey.ac.nz/about/university-calendar-
+    # and-regulations/qualification-regulations/), which state the total
+    # credits explicitly and authoritatively (e.g. "shall follow a...
+    # programme of study... totalling at least N credits") - a more direct
+    # source than the description-page prose PMART/PMSCN were checked
+    # against, and available for every Master's qualification at once via
+    # the same index. All four other Level-9-length-2 qualifications
+    # checked in the same sweep (PMAPC Master of Applied Social Work, PMCLR
+    # Master of Clinical Practice (Nursing), PMSCW Master of Social Work)
+    # were confirmed correct at 240cr and need no entry here.
+    #
+    # PMSPL Master of Speech and Language Therapy. Regulations: "courses
+    # totalling at least 180 credits" (.../qualification-regulations/
+    # master-of-speech-and-language-therapy/).
+    "PMSPL": 1.5,
+    # PMFDS Master of Food Safety and Quality. Regulations: "courses
+    # totalling at least 180 credits" (.../qualification-regulations/
+    # master-of-food-safety-and-quality/). Corroborated by a third-party
+    # aggregator independently describing it as an "18 months" programme.
+    "PMFDS": 1.5,
+    # PMANL Master of Analytics. Regulations: "courses totalling at least
+    # 180 credits" (.../qualification-regulations/master-of-analytics/).
+    "PMANL": 1.5,
+    # PMFNN Master of Finance. Regulations: "courses totalling at least 180
+    # credits" (.../qualification-regulations/master-of-finance/). All
+    # three subjects (Financial Analytics and Research, Financial
+    # Technology, Risk Analytics) are independently listed as 180 credits
+    # each on the same page.
+    "PMFNN": 1.5,
+    # Second batch from the same sweep, same source pattern (each
+    # qualification's own official regulations page at
+    # .../qualification-regulations/<slug>/, stating "totalling at least
+    # N credits" or equivalent). Confirmed correct at 240cr in this batch
+    # and needing no entry: PMCLP Clinical Psychology, PMMRV Māori Visual
+    # Arts, PMRSE Resource and Environmental Planning, PMNRS Nursing,
+    # PMPBH Public Health, PMPRA Professional Accountancy (Chartered
+    # Accountant), PMBSA Executive MBA, PMEDV Educational and Developmental
+    # Psychology (240cr is the default pathway; a 180cr alternate pathway
+    # exists only for candidates already holding a specific named diploma,
+    # which the planner has no way to ask about - same unresolved-pathway
+    # situation as PMSCN above).
+    #
+    # All of the following are the identical 240-stored/180-actual pattern
+    # as PMSPL/PMFDS/PMANL/PMFNN above unless noted:
+    "PMSSD": 1.5,  # Sustainable Development Goals
+    "PMCRW": 1.5,  # Creative Writing
+    "PMENM": 1.5,  # Environmental Management
+    "PMMNG": 1.5,  # Management
+    "PMAPL": 1.5,  # Applied Linguistics
+    "PMCMM": 1.5,  # Communication
+    "PMEDC": 1.5,  # Education
+    "PMHLM": 1.5,  # Health Service Management
+    "PMINC": 1.5,  # International Security
+    "PMIND": 1.5,  # International Development
+    "PMINS": 1.5,  # Information Sciences
+    "PMDSG": 1.5,  # Design
+    "PMPRC": 1.5,  # Professional Accountancy
+    "PMBSS": 1.5,  # Business Studies
+    "PMHLS": 1.5,  # Health Science
+    "PMVTT": 1.5,  # Veterinary Studies
+    "PMEMM": 1.5,  # Emergency Management
+    "PMCNT": 1.5,  # Construction
+    "PMSCA": 1.5,  # Screen Arts
+    "PMCMS": 1.5,  # Commercial Music
+    "PMMRS": 1.5,  # Māori Studies (confirmed via its own description page:
+    # "Time to complete: 1 year 6 months full-time (180 credits)" -
+    # regulations-page search for this one didn't surface the total
+    # directly, so the description page was used instead, same standard
+    # as PMART/PMSCN).
+    # PMFNA Master of Fine Arts. Regulations: 180 credits (Part One 60cr +
+    # Part Two 120cr thesis). One older cached search snippet showed 240cr
+    # for this qualification with no visible date; the current dated
+    # regulations page (checked directly) says 180 and is internally
+    # consistent with the 60+120 Part structure, so it was trusted over
+    # the undated snippet. Worth a second look if this ever looks off.
+    "PMFNA": 1.5,
+    # PMSPT Master of Specialist Teaching. Regulations: 180cr is the default
+    # pathway; shorter alternate pathways (120cr) exist for candidates with
+    # specific prior qualifications, same unresolved-pathway caveat as
+    # PMSCN/PMEDV above.
+    "PMSPT": 1.5,
+    # PMCNS Master of Counselling. Different magnitude from every other
+    # entry here: regulations state 120 credits total, not 180 - stored
+    # length=2 (240cr) is 2x too high, not 1.33x. Reuses the existing
+    # (9, 1) DegreeProfile entry (120cr) rather than (9, 1.5).
+    "PMCNS": 1.0,
+    # Final two from the sweep, completing all 41 originally-unverified
+    # Level-9-length-2 qualifications. Same 240-stored/180-actual pattern:
+    "PMAGC": 1.5,  # Agribusiness
+    "PMFDT": 1.5,  # Food Technology (default pathway; 120cr alt pathway
+    # exists for candidates admitted via a specific route, same
+    # unresolved-pathway caveat as PMSCN/PMEDV/PMSPT above)
+}
+
+
+def apply_verified_qualification_length_fixes(
+    qualifications: list[dict],
+) -> tuple[list[dict], int]:
+    """
+    Apply the manually-verified qualification-length corrections in
+    _VERIFIED_QUALIFICATION_LENGTH_FIXES. Each entry was individually
+    checked against a live Massey subject page, not assumed from the
+    scraped `qual_length` field. Idempotent, same as
+    apply_verified_prereq_fixes.
+    """
+    fixes = _VERIFIED_QUALIFICATION_LENGTH_FIXES
+    out = []
+    n_fixed = 0
+    for q in qualifications:
+        code = q.get("qual_code")
+        if code in fixes:
+            out.append({**q, "length": fixes[code]})
+            n_fixed += 1
+        else:
+            out.append(q)
+    return out, n_fixed
+
+
+# Three majors under length-fixed qualifications hit the exact same stale-240
+# arithmetic (fixed_credits + old_open_credits == 240) but produce a NEGATIVE
+# corrected value: their own explicitly-modelled, non-open pools already sum
+# to 210cr, more than the real 180cr total, even before the trailing open
+# node is touched at all. Deliberately NOT auto-corrected: unlike the other
+# 48 (a single mechanical subtraction, self-evidently required once the
+# qualification total was already verified), guessing a fix here would mean
+# inventing curriculum content without checking it, exactly what
+# _VERIFIED_PREREQ_FIXES-style corrections are meant to avoid.
+#
+# Live-verified afterwards (not left as an open mystery): all three are
+# confirmed instances of the same Geography/Sociology-MA "Part One credit
+# range correlated with Part Two pathway choice" structural gap
+# (test_correlated_part_one_two_majors_not_yet_fixed in test_integration.py
+# has the full citation per major) - not a new or different bug. E.g.
+# Ecology and Conservation - MSc's own page: Part One subject courses are
+# "Choose between 30 and 60 credits from", Part Two thesis is "Choose
+# between 90 and 120 credits from" - two correlated pathways summing to
+# 180cr either way, stored here as two independent fixed-size ALL_OF
+# requirements instead. The real fix needs the same domain-model work
+# Geography's Part One still needs (representing two correlated ANY_OF
+# choices), not a data patch - see DATA_QUALITY.md.
+_UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS: frozenset[str] = frozenset({
+    "Ecology and Conservation – Master of Science",
+    "Occupational Health and Safety – Master of Health Science",
+    "Māori Health – Master of Health Science",
+})
+
+
+def fix_stale_free_elective_pool_sizes(
+    majors: list[dict],
+    qualifications: list[dict],
+    specialisations: list[dict],
+    cm: dict,
+) -> tuple[list[dict], int]:
+    """
+    Fixes the root cause behind the Chemistry/Mathematics - MSc "free
+    electives" DegreeValidator failure, and 48 other majors sharing the
+    identical bug, discovered while investigating that pair.
+
+    Every major's requirement tree that has a trailing, unconstrained
+    CHOOSE_CREDITS node (`course_codes: []`, meaning "any course, from
+    anywhere" - the generic free-electives placeholder) was sized as
+    (240 - explicitly-modelled credits), using qual_length's OLD, WRONG
+    240cr-implying value for every qualification later corrected by
+    _VERIFIED_QUALIFICATION_LENGTH_FIXES - not the real total. Confirmed
+    empirically, not assumed: every one of the 51 majors under a
+    length-fixed qualification with exactly one such open node sums to
+    precisely 240 (explicitly-modelled credits + the stored open-node size),
+    with zero exceptions - consistent with majors.json having derived
+    "remaining credits for free electives" from the qualification's stored
+    (wrong) total at build time, baking in a stale absolute number instead
+    of a value computed against the correct one.
+
+    This is a mechanical correction, not a new claim about curriculum
+    content: the open node's whole job is "whatever's left over to reach
+    the total", and the total itself was already independently
+    live-verified via _VERIFIED_QUALIFICATION_LENGTH_FIXES - correcting the
+    placeholder to be internally consistent with that already-verified
+    total doesn't require checking a live page again. Only applies to
+    majors with a plain ALL_OF root and exactly one open CHOOSE_CREDITS
+    node; anything else (already-ANY_OF majors like Geography/English/
+    Sociology, multi-open-node majors, non-ALL_OF roots) is left untouched.
+    Idempotent: recomputes from the unchanged non-open credits each time,
+    so running twice is a no-op.
+
+    _UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS lists the 3 majors where this
+    arithmetic goes negative (their own non-open pools already exceed the
+    real total) - explicitly skipped rather than guessed at. If a future
+    dataset update produces a new negative case not in that set, it's
+    skipped too (never silently written as a negative or clamped-to-zero
+    credit target) and will show up as a lower fix count here to catch it.
+    """
+    fixed_quals, _ = apply_verified_qualification_length_fixes(qualifications)
+    qual_by_code = {q["qual_code"]: q for q in fixed_quals}
+    title_to_qualcode = {s["title"]: s["qual_code"] for s in specialisations}
+    fixed_qual_codes = set(_VERIFIED_QUALIFICATION_LENGTH_FIXES)
+
+    out = []
+    n_fixed = 0
+    for m in majors:
+        qual_code = title_to_qualcode.get(m["name"])
+        req = m.get("requirement")
+        if (
+            qual_code not in fixed_qual_codes
+            or m["name"] in _UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS
+            or not req
+            or req.get("type") != "ALL_OF"
+        ):
+            out.append(m)
+            continue
+
+        fixed_credits = 0
+        open_nodes = []
+        for child in req.get("children", []):
+            if child["type"] == "COURSE":
+                fixed_credits += cm.get(child["course_code"], {}).get("credits", 0)
+            elif child["type"] == "CHOOSE_CREDITS":
+                if child.get("course_codes"):
+                    fixed_credits += child["credits"]
+                else:
+                    open_nodes.append(child)
+
+        if len(open_nodes) != 1:
+            out.append(m)
+            continue
+
+        real_total = int(qual_by_code[qual_code]["length"] * 120)
+        new_credits = real_total - fixed_credits
+        if new_credits < 0 or new_credits == open_nodes[0]["credits"]:
+            out.append(m)
+            continue
+
+        target = open_nodes[0]
+        new_children = [
+            {**c, "credits": new_credits} if c is target else c
+            for c in req["children"]
+        ]
+        out.append({**m, "requirement": {**req, "children": new_children}})
+        n_fixed += 1
+    return out, n_fixed
+
 
 def normalise_courses(courses: list[dict]) -> list[dict]:
     out = []
@@ -515,6 +820,8 @@ def main() -> None:
     orig_courses: list[dict] = _load(src("courses.json"))
     courses: list[dict] = orig_courses
     majors:  list[dict] = _load(src("majors.json"))
+    qualifications: list[dict] = _load(src("qualifications.json"))
+    specialisations: list[dict] = _load(src("specialisations.json"))
     cm = {c["course_code"]: c for c in courses}
 
     # ── courses ──
@@ -553,6 +860,23 @@ def main() -> None:
     )
     log.info("  pool codes: %d → %d (+%d)  %s", before, after, after - before, stats2)
 
+    # ── qualifications ──
+    log.info("Pass 4 – apply manually-verified qualification-length fixes …")
+    qualifications, n_qual_fixed = apply_verified_qualification_length_fixes(qualifications)
+    log.info(
+        "  %d qualification(s) corrected (see _VERIFIED_QUALIFICATION_LENGTH_FIXES)",
+        n_qual_fixed,
+    )
+
+    log.info("Pass 5 – recompute stale free-elective pool sizes …")
+    majors, n_pool_fixed = fix_stale_free_elective_pool_sizes(
+        majors, qualifications, specialisations, cm,
+    )
+    log.info(
+        "  %d major(s) corrected (see fix_stale_free_elective_pool_sizes)",
+        n_pool_fixed,
+    )
+
     if dry_run:
         n_changed = sum(
             1 for a, b in zip(orig_courses, courses)
@@ -569,6 +893,7 @@ def main() -> None:
     log.info("Saving …")
     _save("courses.json", courses)
     _save("majors.json", majors)
+    _save("qualifications.json", qualifications)
     log.info("Done.  Run `coursemap validate` to verify.")
 
 

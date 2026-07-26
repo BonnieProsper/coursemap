@@ -228,6 +228,56 @@ def test_fetch_relations_marks_unreliable_after_exhausting_retries(monkeypatch):
     assert reliable is False
 
 
+def test_scrape_course_relations_surfaces_exception_detail():
+    """
+    A request-level failure (timeout, connection error, DNS failure, or a
+    bug in this function) must report what actually happened, not just
+    "_status_code: None" - that alone looks identical for every distinct
+    cause and gives an operator nothing to act on. Real requests library
+    isn't touched here; scrape_course_relations is exercised directly
+    against a URL scheme it can't handle, which is enough to trigger its
+    own except-Exception path without needing the network.
+    """
+    from coursemap.ingestion.prerequisite_scraper import scrape_course_relations
+
+    result = scrape_course_relations("not-a-valid-url", timeout=1, include_diagnostics=True)
+
+    assert result["_status_code"] is None
+    assert result["_content_length"] == 0
+    assert "_error" in result, "Exception detail must be surfaced when a fetch fails entirely"
+    assert result["_error"], "Exception detail must not be an empty string"
+
+
+def test_fetch_relations_includes_exception_detail_in_warning(monkeypatch, caplog):
+    """
+    _fetch_relations' WARNING-level log (the one an operator actually sees
+    in a normal run, unlike DEBUG) must include the underlying exception
+    message when a request fails entirely, not just the generic
+    "content_length=0 (expected >= 5000)" - that phrasing is indistinguishable
+    from a request that got a real but short HTTP response, which is a
+    different problem with a different fix.
+    """
+    import logging
+
+    def fake_scrape(url, timeout=10, include_diagnostics=False):
+        return {
+            "prerequisites": None, "restrictions": [], "corequisites": [],
+            "_status_code": None, "_content_length": 0,
+            "_error": "ConnectionError: [Errno 111] Connection refused",
+        }
+
+    monkeypatch.setattr(rp, "scrape_course_relations", fake_scrape)
+    monkeypatch.setattr(rp.time, "sleep", lambda seconds: None)
+
+    with caplog.at_level(logging.WARNING, logger="coursemap.ingestion.refresh_prerequisites"):
+        rp._fetch_relations("999999", "https://example.invalid/", 10, {"prerequisites": None, "restrictions": [], "corequisites": []})
+
+    warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("Connection refused" in w for w in warnings), (
+        f"Expected the underlying connection error in a WARNING-level log, got: {warnings}"
+    )
+
+
 def test_fetch_relations_backoff_grows_across_attempts(monkeypatch):
     """
     The actual point of this round's fix: later attempts must sleep
@@ -486,9 +536,9 @@ def test_unexpected_exception_counts_toward_untouched_and_is_visible_to_warning(
 
 def test_is_suspicious_regression_catches_real_123305_incident():
     """
-    Course 123305's real prerequisite tree, live-verified correct earlier,
-    versus what a real production scrape run actually
-    returned for it (twice, identically, at two very different speeds).
+    Course 123305's real prerequisite tree, live-verified against Massey,
+    versus what a real production scrape run actually returned for it
+    (twice, identically, at two very different speeds).
     HTTP 200, a normal-sized response, no error - only this check catches it.
     """
     from coursemap.ingestion.refresh_prerequisites import _is_suspicious_regression

@@ -17,8 +17,32 @@ from .requirement_nodes import (
 )
 
 
+def _cheapest_any_of_child(node: AnyOfRequirement) -> RequirementNode | None:
+    """
+    Picks which child of an AnyOfRequirement to treat as "the" required
+    path, by total CHOOSE_CREDITS/CHOOSE_N credit cost (e.g. a 60cr
+    research-report branch over a 90cr thesis branch). Shared by
+    collect_course_codes and collect_elective_nodes so they always agree
+    on the same branch - if they picked independently, one could include
+    a course code the other didn't reserve a pool slot for, leaking the
+    unchosen branch's codes into required_codes instead of correctly
+    dropping them.
+    """
+    if not node.children:
+        return None
+    return min(
+        node.children,
+        key=lambda c: sum(n.credits for n in collect_elective_nodes(c)),
+    )
+
+
 def collect_course_codes(node: RequirementNode) -> set[str]:
-    """Recursively collect all course codes mentioned anywhere in the tree."""
+    """Recursively collect all course codes mentioned anywhere in the tree,
+    including every branch of an AnyOfRequirement - this is a general
+    "what codes could this tree ever involve" utility, not scoped to any
+    one selected path. For the narrower "which codes belong to an
+    AnyOfRequirement branch that plan-building didn't choose" question,
+    see collect_unchosen_any_of_codes."""
     out: set[str] = set()
     if isinstance(node, CourseRequirement):
         out.add(node.course_code)
@@ -35,16 +59,67 @@ def collect_course_codes(node: RequirementNode) -> set[str]:
     return out
 
 
+def collect_unchosen_any_of_codes(node: RequirementNode) -> set[str]:
+    """
+    Recursively collects course codes belonging only to the branches of
+    an AnyOfRequirement that _cheapest_any_of_child did NOT pick.
+
+    collect_course_codes intentionally includes every branch's codes
+    (it's a general "what could this tree involve" utility - see its own
+    docstring and test). But required_codes = all_major_codes - pool_codes
+    in planner_service.py needs the opposite: once plan-building has
+    committed to one AnyOfRequirement branch (via collect_elective_nodes),
+    the OTHER branch's codes must not become hard-required just because
+    they weren't claimed by pool_codes either - a course from a 90cr
+    thesis branch that wasn't chosen must not silently become as
+    mandatory as the actual requirements, forcing it into the plan
+    alongside the chosen 60cr research-report branch.
+    """
+    out: set[str] = set()
+    if isinstance(node, AllOfRequirement):
+        for c in node.children:
+            out |= collect_unchosen_any_of_codes(c)
+    elif isinstance(node, AnyOfRequirement):
+        chosen = _cheapest_any_of_child(node)
+        for c in node.children:
+            if c is not chosen:
+                out |= collect_course_codes(c)
+            else:
+                out |= collect_unchosen_any_of_codes(c)
+    elif isinstance(node, MajorRequirement):
+        out |= collect_unchosen_any_of_codes(node.requirement)
+    return out
+
+
 def collect_elective_nodes(
     node: RequirementNode,
 ) -> list[ChooseCreditsRequirement | ChooseNRequirement]:
-    """Recursively collect all CHOOSE_CREDITS and CHOOSE_N nodes at any depth."""
+    """
+    Recursively collect all CHOOSE_CREDITS and CHOOSE_N nodes at any depth.
+
+    An AnyOfRequirement represents a genuine choice between alternative
+    paths (e.g. a thesis pool vs a research-report pool) - unlike
+    AllOfRequirement, its children are not all simultaneously required.
+    Recursing into every child here would hand the selection logic in
+    search.py a flat list of pools to satisfy with no indication that
+    satisfying one branch means the other shouldn't be touched at all;
+    the selection logic has no other way to know these are alternatives,
+    not a shopping list, so it tries to satisfy every pool it's handed
+    and ends up including both alternatives in the same plan. Recursing
+    only into the cheapest branch (see _cheapest_any_of_child) avoids
+    that: the resulting plan satisfies the requirement via a single
+    path, consistent with what AnyOfRequirement means.
+    """
     out: list[ChooseCreditsRequirement | ChooseNRequirement] = []
     if isinstance(node, (ChooseCreditsRequirement, ChooseNRequirement)):
         out.append(node)
-    if isinstance(node, (AllOfRequirement, AnyOfRequirement)):
+    if isinstance(node, AllOfRequirement):
         for c in node.children:
             out.extend(collect_elective_nodes(c))
+    elif isinstance(node, AnyOfRequirement):
+        chosen = _cheapest_any_of_child(node)
+        if chosen is not None:
+            out.extend(collect_elective_nodes(chosen))
     elif isinstance(node, MajorRequirement):
         out.extend(collect_elective_nodes(node.requirement))
     return out

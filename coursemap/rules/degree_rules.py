@@ -106,6 +106,13 @@ _DEGREE_PROFILES: dict[tuple, DegreeProfile] = {
     ),
     # Taught master's (2yr, Level 9)
     (9, 2): DegreeProfile(total_credits=240),
+    # Taught master's (1.5yr, Level 9) - e.g. Master of Arts, live-verified
+    # at 180cr / "3 semesters of full-time study" against its own subject
+    # pages (see repair_dataset.py's _VERIFIED_QUALIFICATION_LENGTH_FIXES),
+    # not the length*120 default. Massey's `qual_length` metadata field
+    # rounds this up to 2 for many such qualifications; do not assume every
+    # (9, 2) qualification is genuinely 240cr without checking the same way.
+    (9, 1.5): DegreeProfile(total_credits=180),
     # Accelerated master's (1yr, Level 9)
     (9, 1): DegreeProfile(total_credits=120),
 }

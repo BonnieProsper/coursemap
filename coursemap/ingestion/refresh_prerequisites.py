@@ -200,6 +200,7 @@ def _fetch_relations(
         result = scrape_course_relations(url, timeout=timeout, include_diagnostics=True)
         status = result.pop("_status_code")
         content_length = result.pop("_content_length")
+        error = result.pop("_error", None)
         last_result = result
 
         if status in _PERMANENT_FAILURE_STATUS_CODES:
@@ -211,6 +212,13 @@ def _fetch_relations(
             if not is_regression:
                 return code, result, True, False
             reason_str = reason
+        elif status is None:
+            # The request never got a response at all (timeout, connection
+            # error, DNS failure, or a bug in the scraper itself) - report
+            # what actually happened instead of the generic
+            # "content_length=0", which looks identical for every distinct
+            # cause and gives an operator nothing to act on.
+            reason_str = f"request failed: {error}" if error else "request failed (no further detail captured)"
         else:
             reason_str = (
                 f"content_length={content_length} (expected >= "

@@ -18,6 +18,10 @@ from coursemap.ingestion.repair_dataset import (
     break_all_cycles,
     apply_verified_prereq_fixes,
     _VERIFIED_PREREQ_FIXES,
+    apply_verified_qualification_length_fixes,
+    _VERIFIED_QUALIFICATION_LENGTH_FIXES,
+    fix_stale_free_elective_pool_sizes,
+    _UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS,
     _raw_prereq_hard_codes,
     _remove_raw_prereq_code,
     main,
@@ -227,6 +231,8 @@ def test_dry_run_does_not_write_files(tmp_path, monkeypatch):
 
     (tmp_path / "courses.json").write_text(json.dumps(courses), encoding="utf-8")
     (tmp_path / "majors.json").write_text(json.dumps(majors), encoding="utf-8")
+    (tmp_path / "qualifications.json").write_text(json.dumps([]), encoding="utf-8")
+    (tmp_path / "specialisations.json").write_text(json.dumps([]), encoding="utf-8")
 
     monkeypatch.setattr(rd, "_DS", tmp_path)
     monkeypatch.setattr("sys.argv", ["repair_dataset.py", "--dry-run"])
@@ -256,7 +262,7 @@ def test_real_dataset_repair_is_idempotent_and_preserves_and_or(tmp_path, monkey
     from pathlib import Path
 
     real_datasets = Path(__file__).resolve().parents[1] / "datasets"
-    for name in ("courses.json", "majors.json"):
+    for name in ("courses.json", "majors.json", "qualifications.json", "specialisations.json"):
         shutil.copy2(real_datasets / name, tmp_path / name)
 
     monkeypatch.setattr(rd, "_DS", tmp_path)
@@ -293,6 +299,10 @@ def test_verified_fixes_applies_every_documented_code():
         _course("161380", prereqs=[]),
         _course("160212", prereqs=["160101"]),
         _course("123201", prereqs=["123102"]),
+        _course("117226", prereqs=["117152"]),
+        _course("117243", prereqs=["117153"]),
+        _course("120303", prereqs=["120201"]),
+        _course("286321", prereqs=["117152"]),
         _course("999999", prereqs=["161111"]),  # not in the fix list, must be untouched
     ]
     fixed, n = apply_verified_prereq_fixes(courses)
@@ -315,6 +325,72 @@ def test_verified_fixes_is_idempotent():
     twice, n2 = apply_verified_prereq_fixes(once)
     assert n1 == n2 == len(_VERIFIED_PREREQ_FIXES)
     assert once == twice
+
+
+# ---------------------------------------------------------------------------
+# apply_verified_qualification_length_fixes: manually-verified qualification
+# length corrections (PMART / Master of Arts, see DATA_QUALITY.md and
+# rules/degree_rules.py's (9, 1.5) DegreeProfile entry for the source
+# citations this is based on)
+# ---------------------------------------------------------------------------
+
+def test_qualification_length_fixes_applies_every_documented_code():
+    """Every qual_code in _VERIFIED_QUALIFICATION_LENGTH_FIXES must actually
+    get corrected, and qual_codes not in the fix list must be untouched."""
+    quals = [{"qual_code": c, "title": c, "length": 2} for c in _VERIFIED_QUALIFICATION_LENGTH_FIXES]
+    quals.append({"qual_code": "PMNRS", "title": "Master of Nursing", "length": 2})
+    fixed, n = apply_verified_qualification_length_fixes(quals)
+    by_code = {q["qual_code"]: q for q in fixed}
+
+    assert n == len(_VERIFIED_QUALIFICATION_LENGTH_FIXES)
+    for code, expected in _VERIFIED_QUALIFICATION_LENGTH_FIXES.items():
+        assert by_code[code]["length"] == expected
+    assert by_code["PMNRS"]["length"] == 2, (
+        "A qualification not in _VERIFIED_QUALIFICATION_LENGTH_FIXES was modified"
+    )
+
+
+def test_qualification_length_fixes_is_idempotent():
+    """Running the fix twice must produce exactly the same result as once."""
+    quals = [{"qual_code": c, "length": 2} for c in _VERIFIED_QUALIFICATION_LENGTH_FIXES]
+    once, n1 = apply_verified_qualification_length_fixes(quals)
+    twice, n2 = apply_verified_qualification_length_fixes(once)
+    assert n1 == n2 == len(_VERIFIED_QUALIFICATION_LENGTH_FIXES)
+    assert once == twice
+
+
+def test_pmart_length_fix_produces_180cr_profile():
+    """
+    Regression test tying the two halves of this fix together: PMART's
+    corrected length (1.5) must actually resolve to a 180cr DegreeProfile,
+    not silently fall through to the length*120 default (which would
+    coincidentally also give 180 - this checks the real (9, 1.5) table
+    entry is used, not the fallback, by checking level constraints aren't
+    silently dropped the way the fallback does).
+    """
+    from coursemap.rules.degree_rules import profile_for, _DEGREE_PROFILES
+
+    assert (9, 1.5) in _DEGREE_PROFILES, (
+        "(9, 1.5) must be a real table entry, not rely on the length*120 fallback"
+    )
+    profile = profile_for(9, 1.5)
+    assert profile.total_credits == 180
+
+
+def test_pmcns_length_fix_produces_120cr_profile():
+    """
+    Same tie-together as test_pmart_length_fix_produces_180cr_profile, for
+    the (9, 1.0) profile - PMCNS (Master of Counselling) is the first real
+    qualification in _VERIFIED_QUALIFICATION_LENGTH_FIXES to use it, so
+    nothing previously exercised this path.
+    """
+    from coursemap.rules.degree_rules import profile_for, _DEGREE_PROFILES
+
+    assert (9, 1.0) in _DEGREE_PROFILES, (
+        "(9, 1.0) must be a real table entry, not rely on the length*120 fallback"
+    )
+    profile = profile_for(9, 1.0)
+    assert profile.total_credits == 120
 
 
 def test_verified_fixes_only_touches_listed_codes():
@@ -354,3 +430,153 @@ def test_verified_fixes_real_dataset_201250_and_161251_load_without_crashing():
         # OR-aware satisfaction: any one of the prefix-matched courses should satisfy it
         assert expr.is_satisfied({"161111"})
         assert not expr.is_satisfied(set())
+
+
+# ---------------------------------------------------------------------------
+# fix_stale_free_elective_pool_sizes (see repair_dataset.py's docstring for
+# the full root-cause story: every one of 51 majors under a length-fixed
+# qualification had its "free electives from anywhere" placeholder sized
+# against the qualification's OLD 240cr total, not the corrected one)
+# ---------------------------------------------------------------------------
+
+def _cm(codes_credits):
+    return {code: {"course_code": code, "credits": cr} for code, cr in codes_credits.items()}
+
+
+def test_fix_stale_free_elective_pool_sizes_corrects_chemistry_shaped_major():
+    """Chemistry MSc's real shape: two 30cr compulsory courses + a 120cr
+    thesis pool + a stale 60cr open node (30+30+120+60=240, the OLD wrong
+    total) - should become 0cr (180-180) against the corrected 180cr
+    total."""
+    quals = [{"qual_code": "PMSCN", "title": "Master of Science", "length": 2}]
+    specs = [{"title": "Chemistry – Master of Science", "qual_code": "PMSCN"}]
+    majors = [{
+        "name": "Chemistry – Master of Science",
+        "requirement": {
+            "type": "ALL_OF",
+            "children": [
+                {"type": "COURSE", "course_code": "123711"},
+                {"type": "COURSE", "course_code": "123713"},
+                {"type": "CHOOSE_CREDITS", "credits": 120, "course_codes": ["123899"]},
+                {"type": "CHOOSE_CREDITS", "credits": 60, "course_codes": []},
+            ],
+        },
+    }]
+    cm = _cm({"123711": 30, "123713": 30, "123899": 120})
+
+    fixed, n = fix_stale_free_elective_pool_sizes(majors, quals, specs, cm)
+    assert n == 1
+    open_node = fixed[0]["requirement"]["children"][-1]
+    assert open_node["credits"] == 0
+    assert open_node["course_codes"] == []
+
+
+def test_fix_stale_free_elective_pool_sizes_corrects_mathematics_shaped_major():
+    """Mathematics MSc's real shape: a 120cr thesis pool + a stale 120cr
+    open node (120+120=240) - should become 60cr (180-120) against the
+    corrected total."""
+    quals = [{"qual_code": "PMSCN", "title": "Master of Science", "length": 2}]
+    specs = [{"title": "Mathematics – Master of Science", "qual_code": "PMSCN"}]
+    majors = [{
+        "name": "Mathematics – Master of Science",
+        "requirement": {
+            "type": "ALL_OF",
+            "children": [
+                {"type": "CHOOSE_CREDITS", "credits": 120, "course_codes": ["160899"]},
+                {"type": "CHOOSE_CREDITS", "credits": 120, "course_codes": []},
+            ],
+        },
+    }]
+    cm = _cm({"160899": 120})
+
+    fixed, n = fix_stale_free_elective_pool_sizes(majors, quals, specs, cm)
+    assert n == 1
+    assert fixed[0]["requirement"]["children"][-1]["credits"] == 60
+
+
+def test_fix_stale_free_elective_pool_sizes_skips_known_negative_majors():
+    """The 3 majors in _UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS have their
+    OWN non-open pools already exceeding the real total (a distinct,
+    unresolved bug) - must be left completely untouched, not clamped or
+    guessed at."""
+    name = next(iter(_UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS))
+    quals = [{"qual_code": "PMSCN", "title": "Master of Science", "length": 2}]
+    specs = [{"title": name, "qual_code": "PMSCN"}]
+    original_req = {
+        "type": "ALL_OF",
+        "children": [
+            {"type": "CHOOSE_CREDITS", "credits": 210, "course_codes": ["999999"]},
+            {"type": "CHOOSE_CREDITS", "credits": 30, "course_codes": []},
+        ],
+    }
+    majors = [{"name": name, "requirement": original_req}]
+    cm = _cm({"999999": 210})
+
+    fixed, n = fix_stale_free_elective_pool_sizes(majors, quals, specs, cm)
+    assert n == 0
+    assert fixed[0]["requirement"] == original_req
+
+
+def test_fix_stale_free_elective_pool_sizes_skips_qualifications_not_in_fix_table():
+    """A major under a qualification never touched by
+    _VERIFIED_QUALIFICATION_LENGTH_FIXES must be left alone, even with the
+    same open-node shape - there's no verified 'correct total' to recompute
+    against."""
+    quals = [{"qual_code": "PDSCN", "title": "Postgraduate Diploma", "length": 1}]
+    specs = [{"title": "Untouched Subject – Some Diploma", "qual_code": "PDSCN"}]
+    original_req = {
+        "type": "ALL_OF",
+        "children": [
+            {"type": "COURSE", "course_code": "111111"},
+            {"type": "CHOOSE_CREDITS", "credits": 90, "course_codes": []},
+        ],
+    }
+    majors = [{"name": "Untouched Subject – Some Diploma", "requirement": original_req}]
+    cm = _cm({"111111": 30})
+
+    fixed, n = fix_stale_free_elective_pool_sizes(majors, quals, specs, cm)
+    assert n == 0
+    assert fixed[0]["requirement"] == original_req
+
+
+def test_fix_stale_free_elective_pool_sizes_is_idempotent():
+    quals = [{"qual_code": "PMSCN", "title": "Master of Science", "length": 2}]
+    specs = [{"title": "Chemistry – Master of Science", "qual_code": "PMSCN"}]
+    majors = [{
+        "name": "Chemistry – Master of Science",
+        "requirement": {
+            "type": "ALL_OF",
+            "children": [
+                {"type": "COURSE", "course_code": "123711"},
+                {"type": "COURSE", "course_code": "123713"},
+                {"type": "CHOOSE_CREDITS", "credits": 120, "course_codes": ["123899"]},
+                {"type": "CHOOSE_CREDITS", "credits": 60, "course_codes": []},
+            ],
+        },
+    }]
+    cm = _cm({"123711": 30, "123713": 30, "123899": 120})
+
+    once, n1 = fix_stale_free_elective_pool_sizes(majors, quals, specs, cm)
+    twice, n2 = fix_stale_free_elective_pool_sizes(once, quals, specs, cm)
+    assert n1 == 1
+    assert n2 == 0  # already correct on the second pass, nothing left to fix
+    assert once == twice
+
+
+def test_fix_stale_free_elective_pool_sizes_leaves_multi_open_node_majors_alone():
+    """A major with more than one open CHOOSE_CREDITS node is a shape this
+    function has never seen in the real dataset - don't guess which one is
+    the 'real' free-electives placeholder, leave both untouched."""
+    quals = [{"qual_code": "PMSCN", "title": "Master of Science", "length": 2}]
+    specs = [{"title": "Hypothetical – Master of Science", "qual_code": "PMSCN"}]
+    original_req = {
+        "type": "ALL_OF",
+        "children": [
+            {"type": "CHOOSE_CREDITS", "credits": 30, "course_codes": []},
+            {"type": "CHOOSE_CREDITS", "credits": 30, "course_codes": []},
+        ],
+    }
+    majors = [{"name": "Hypothetical – Master of Science", "requirement": original_req}]
+    fixed, n = fix_stale_free_elective_pool_sizes(majors, quals, specs, _cm({}))
+    assert n == 0
+    assert fixed[0]["requirement"] == original_req
