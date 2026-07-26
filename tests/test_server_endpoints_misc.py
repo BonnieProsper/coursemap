@@ -3139,8 +3139,50 @@ def test_build_gap_meta_returns_expected_keys():
     req = PlanRequest(major="Computer Science – Bachelor of Information Sciences", no_summer=True)
     plan = svc.generate_best_plan(req.major, no_summer=True)
     result = _build_gap_meta(plan, svc, req, "Computer Science – Bachelor of Information Sciences", None)
-    assert set(result.keys()) == {"degree_total", "raw_gap", "residual_gap", "gap_explanation"}
+    assert set(result.keys()) == {"degree_total", "raw_gap", "residual_gap", "gap_explanation", "structural_errors"}
     assert result["degree_total"] == 360
+
+
+def test_build_gap_meta_catches_structural_shortfall_credit_count_misses():
+    """
+    Regression test for the gap between credit-count arithmetic and real
+    structural validation (see DATA_QUALITY.md / CHANGELOG.md "the CLI's
+    satisfied message doesn't mean what it looks like it means").
+
+    Originally demonstrated with Chemistry - Master of Science, whose
+    "free electives" shortfall was itself a data bug (a stale placeholder
+    pool sized against the qualification's old, wrong 240cr total - see
+    CHANGELOG.md "Fixed: the Chemistry/Mathematics MSc free-electives
+    shortfall, and 48 other majors sharing the same root cause"). Fixing
+    that data bug made Chemistry's plan genuinely complete, so it stopped
+    demonstrating the gap this test exists to catch. Animal Science -
+    Master of Science (M/INT) has the same shape for a different,
+    still-open reason (a named elective pool, not the free-electives
+    catch-all, goes unfilled) and is used here instead.
+
+    Animal Science - Master of Science, M/INT: generate_filled_plan reaches
+    the degree's credit target exactly, so residual_gap is 0 - the old
+    credit-count-only check would call this complete. The real
+    DegreeValidator fails it: a named elective pool (90cr from 4 available
+    courses) is unmet. structural_errors must surface that even though
+    residual_gap is 0.
+    """
+    from coursemap.api.server import _build_gap_meta, _svc, PlanRequest
+    svc = _svc()
+    major = "Animal Science – Master of Science"
+    req = PlanRequest(major=major, campus="M", mode="INT", no_summer=True, auto_fill=True)
+    plan, filler = svc.generate_filled_plan(major, campus="M", mode="INT", no_summer=True)
+    result = _build_gap_meta(plan, svc, req, major, None)
+
+    assert result["residual_gap"] == 0, (
+        "test setup assumption broken: this plan should hit the credit "
+        "target exactly, which is what makes the structural check necessary"
+    )
+    assert result["structural_errors"], (
+        "structural_errors should catch the elective-pool shortfall that "
+        "residual_gap (credit-count only) misses"
+    )
+    assert any("elective pool" in e.lower() for e in result["structural_errors"])
 
 
 def test_build_gap_meta_zero_when_plan_complete():

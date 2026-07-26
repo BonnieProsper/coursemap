@@ -34,6 +34,7 @@ from coursemap.ingestion.minor_loader import load_minors, search_minors
 from coursemap.ingestion.freshness import freshness_report
 from coursemap.services.planner_service import PlannerService
 from coursemap.validation.dataset_validator import validate_dataset
+from coursemap.validation.engine import DegreeValidator
 from coursemap.export.ical import plan_to_ical
 from coursemap.domain.fees import fee_per_credit
 from coursemap.api.plan_store import plan_store
@@ -308,11 +309,34 @@ def _build_gap_meta(
                     "Enable Auto-fill to select courses automatically."
                 )
 
+    # Structural requirement check: everything above (residual_gap,
+    # gap_explanation) is credit-count arithmetic - it can reach zero
+    # while a specific named requirement (e.g. a distinct "free electives"
+    # pool separate from the major's own Part One/Two) is still unmet,
+    # since it never checks the actual requirement tree. Run the real
+    # DegreeValidator so a plan that hits the right total but fails a
+    # structural requirement doesn't get reported as complete. Skipped
+    # for double majors (no combined-tree validator exists yet) and
+    # silently skipped on any lookup failure - this is a best-effort
+    # extra check, not a replacement for the credit-count gap above, and
+    # must never turn into a 500 for a plan that already generated fine.
+    structural_errors: list[str] = []
+    if not double_info:
+        try:
+            tree = svc.degree_tree_for_major(resolved_name, campus=req.campus, mode=req.mode)
+            if tree is not None:
+                result = DegreeValidator(tree).validate(plan)
+                if not result.passed:
+                    structural_errors = list(result.errors)
+        except Exception:
+            pass
+
     return {
-        "degree_total":     degree_total,
-        "raw_gap":          raw_gap,
-        "residual_gap":     residual_gap,
-        "gap_explanation":  gap_explanation,
+        "degree_total":       degree_total,
+        "raw_gap":            raw_gap,
+        "residual_gap":       residual_gap,
+        "gap_explanation":    gap_explanation,
+        "structural_errors":  structural_errors,
     }
 
 
@@ -442,11 +466,14 @@ def _plan_to_out(
         "free_elective_gap": gap_info["residual_gap"],
         "raw_elective_gap":  gap_info["raw_gap"],
         "gap_explanation":   gap_info["gap_explanation"],
+        "structural_errors": gap_info["structural_errors"],
         "auto_filled_codes": filler if req.auto_fill else [],
         "prereq_coverage":   _build_prereq_coverage(plan),
     }
 
     warnings = _build_plan_warnings(plan, svc, req, extra_warnings)
+    for err in gap_info["structural_errors"]:
+        warnings.append(f"⚠ Degree requirement not met: {err}")
 
     dmi_out: dict | None = None
     if double_info:

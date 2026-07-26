@@ -862,6 +862,10 @@ def _print_summary(
     filler_codes: list[str],
     courses: dict,
     has_major: bool,
+    svc=None,
+    major_name: str | None = None,
+    campus: str | None = None,
+    mode: str | None = None,
 ) -> None:
     """Print the Summary block and major requirements line."""
     planned_cr   = plan.total_credits()
@@ -894,8 +898,33 @@ def _print_summary(
     elif gap > 0 and transfer_cr >= gap:
         print(f"  Degree target     : {degree_total}cr  (transfer credits cover remaining gap)")
 
+    # Real structural check: everything above is credit-count arithmetic -
+    # it can reach zero while a specific named requirement (e.g. a distinct
+    # "free electives" pool separate from the major's own required pools)
+    # is still unmet, since it never checks the actual requirement tree.
+    # Run the real DegreeValidator so "satisfied" isn't printed for a plan
+    # that hits the right total but fails a structural requirement.
+    # Best-effort only: never let this check itself block printing a
+    # result for a plan that already generated fine.
+    structural_errors: list[str] = []
+    if has_major and svc is not None and major_name:
+        try:
+            from coursemap.validation.engine import DegreeValidator
+            tree = svc.degree_tree_for_major(major_name, campus=campus, mode=mode)
+            if tree is not None:
+                result = DegreeValidator(tree).validate(plan)
+                if not result.passed:
+                    structural_errors = list(result.errors)
+        except Exception:
+            pass
+
     if has_major:
-        print("\nMajor requirements: satisfied")
+        if structural_errors:
+            print("\nMajor requirements: NOT fully satisfied")
+            for err in structural_errors:
+                print(f"  ⚠ {err}")
+        else:
+            print("\nMajor requirements: satisfied")
 
 
 def _print_elective_section(
@@ -1272,7 +1301,8 @@ def _cmd_plan(args: argparse.Namespace) -> None:
     _print_prereq_warnings(prereq_notes, prereq_missing)
     _print_semester_table(plan)
     _print_summary(plan, gap, degree_total, auto_fill, filler_codes, courses,
-                   bool(args.major) and not double_info)
+                   bool(args.major) and not double_info,
+                   svc=svc, major_name=args.major, campus=args.campus, mode=args.mode)
 
     if double_info:
         print("\nBoth major requirements: satisfied")

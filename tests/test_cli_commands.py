@@ -2,7 +2,7 @@
 CLI command coverage: majors, courses, minors, validate, data-quality, and
 plan option combinations not already covered elsewhere.
 
-coursemap/cli/main.py sat at 35-39% coverage for most of this project's
+coursemap/cli/main.py sat at 35-39% coverage for most of the repo's
 history: the argparse dispatch layer and most command bodies had zero
 direct tests, which is exactly why the --no-summer bug (see
 test_cli_summer_flag.py) went undetected for as long as it did. These tests
