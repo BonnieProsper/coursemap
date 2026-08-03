@@ -14,7 +14,7 @@ import json
 import sqlite3
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,7 +53,6 @@ class TestElectiveFiller:
 
     def test_excludes_zero_credit_courses(self):
         from coursemap.planner.elective_filler import ElectiveFiller
-        from coursemap.domain.course import Offering
         courses = {
             "159101": _make_course("159101", credits=15, level=100),
             "000000": _make_course("000000", credits=0, level=100),
@@ -221,7 +220,7 @@ class TestPlanStore:
             assert any(p["plan_id"] == "xyz" and p["hits"] >= 2 for p in top)
 
     def test_prune_on_exceed_max(self):
-        from coursemap.api.plan_store import _PlanStore, _MAX_PLANS
+        from coursemap.api.plan_store import _PlanStore
         with tempfile.TemporaryDirectory() as tmp:
             store = _PlanStore(Path(tmp) / "test.db")
             # Insert more than _MAX_PLANS, normally 10_000 but we patch it

@@ -11,7 +11,6 @@ real courses in the bundled dataset) and break_all_cycles silently
 flattened AND/OR structure into nonsense. See repair_dataset.py docstrings
 for the full story.
 """
-import pytest
 
 from coursemap.ingestion.repair_dataset import (
     repair_prereqs,
@@ -21,7 +20,6 @@ from coursemap.ingestion.repair_dataset import (
     apply_verified_qualification_length_fixes,
     _VERIFIED_QUALIFICATION_LENGTH_FIXES,
     fix_stale_free_elective_pool_sizes,
-    _UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS,
     _raw_prereq_hard_codes,
     _remove_raw_prereq_code,
     main,
@@ -303,6 +301,7 @@ def test_verified_fixes_applies_every_documented_code():
         _course("117243", prereqs=["117153"]),
         _course("120303", prereqs=["120201"]),
         _course("286321", prereqs=["117152"]),
+        _course("267860", prereqs=["267740", "267782", "267783", "267741"]),
         _course("999999", prereqs=["161111"]),  # not in the fix list, must be untouched
     ]
     fixed, n = apply_verified_prereq_fixes(courses)
@@ -494,12 +493,20 @@ def test_fix_stale_free_elective_pool_sizes_corrects_mathematics_shaped_major():
     assert fixed[0]["requirement"]["children"][-1]["credits"] == 60
 
 
-def test_fix_stale_free_elective_pool_sizes_skips_known_negative_majors():
-    """The 3 majors in _UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS have their
-    OWN non-open pools already exceeding the real total (a distinct,
-    unresolved bug) - must be left completely untouched, not clamped or
-    guessed at."""
-    name = next(iter(_UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS))
+def test_fix_stale_free_elective_pool_sizes_skips_negative_results():
+    """
+    A major whose own non-open pools already exceed the real total (so the
+    correction would go negative) must be left completely untouched, not
+    clamped or guessed at - this is a general protection independent of
+    _UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS (which is empty as of this
+    test - Occupational Health and Safety and Māori Health - MHS, the last
+    two majors it ever needed to list, are both fixed now - see
+    test_ohs_and_maori_health_correlated_pathway_fixed in
+    test_integration.py). Uses a synthetic major name rather than drawing
+    from that frozenset, since the frozenset having no members shouldn't
+    make this protection untestable.
+    """
+    name = "Some Hypothetical Over-Specified Major – Master of Science"
     quals = [{"qual_code": "PMSCN", "title": "Master of Science", "length": 2}]
     specs = [{"title": name, "qual_code": "PMSCN"}]
     original_req = {
@@ -513,6 +520,43 @@ def test_fix_stale_free_elective_pool_sizes_skips_known_negative_majors():
     cm = _cm({"999999": 210})
 
     fixed, n = fix_stale_free_elective_pool_sizes(majors, quals, specs, cm)
+    assert n == 0
+    assert fixed[0]["requirement"] == original_req
+
+
+def test_fix_stale_free_elective_pool_sizes_still_skips_named_majors():
+    """
+    Separately from the general negative-value protection above: any major
+    named in _UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS must be skipped
+    outright, even if it would otherwise produce a valid (non-negative)
+    correction - this is what lets the frozenset name a major for a
+    reason unrelated to the arithmetic (e.g. still needing its own live
+    verification) without depending on the numbers happening to come out
+    negative. The frozenset is empty in the real codebase right now, so
+    this test monkeypatches a non-empty one to exercise the branch.
+    """
+    import coursemap.ingestion.repair_dataset as repair_dataset_module
+
+    name = "Hypothetical Named-Skip Major – Master of Science"
+    quals = [{"qual_code": "PMSCN", "title": "Master of Science", "length": 2}]
+    specs = [{"title": name, "qual_code": "PMSCN"}]
+    original_req = {
+        "type": "ALL_OF",
+        "children": [
+            {"type": "COURSE", "course_code": "111111"},
+            {"type": "CHOOSE_CREDITS", "credits": 60, "course_codes": []},
+        ],
+    }
+    majors = [{"name": name, "requirement": original_req}]
+    cm = _cm({"111111": 120})
+
+    original_frozenset = repair_dataset_module._UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS
+    repair_dataset_module._UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS = frozenset({name})
+    try:
+        fixed, n = repair_dataset_module.fix_stale_free_elective_pool_sizes(majors, quals, specs, cm)
+    finally:
+        repair_dataset_module._UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS = original_frozenset
+
     assert n == 0
     assert fixed[0]["requirement"] == original_req
 

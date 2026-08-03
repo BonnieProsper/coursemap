@@ -536,9 +536,9 @@ def test_unexpected_exception_counts_toward_untouched_and_is_visible_to_warning(
 
 def test_is_suspicious_regression_catches_real_123305_incident():
     """
-    Course 123305's real prerequisite tree, live-verified against Massey,
-    versus what a real production scrape run actually returned for it
-    (twice, identically, at two very different speeds).
+    Course 123305's real prerequisite tree, live-verified directly against
+    Massey's page, versus what a real production scrape run actually
+    returned for it (twice, identically, at two very different speeds).
     HTTP 200, a normal-sized response, no error - only this check catches it.
     """
     from coursemap.ingestion.refresh_prerequisites import _is_suspicious_regression

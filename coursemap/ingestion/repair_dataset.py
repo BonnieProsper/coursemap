@@ -86,7 +86,7 @@ def repair_prereqs(courses: list[dict]) -> tuple[list[dict], dict]:
         raw_prereqs = c.get("prerequisites")
 
         if raw_prereqs is None or isinstance(raw_prereqs, (str, dict)):
-            # Already structured, or genuinely empty.
+            # Already structured (or genuinely empty) -- not this pass's job.
             stats["already_structured"] += 1
             out.append(c)
             continue
@@ -479,6 +479,24 @@ _VERIFIED_PREREQ_FIXES: dict[str, dict | str] = {
     # https://www.massey.ac.nz/study/courses/responses-to-training-in-the-equine-athlete-286321/
     # "One of 117152, 117153, 117155 or 194101"
     "286321": {"op": "OR", "args": ["117152", "117153", "117155", "194101"]},
+
+    # 267860 Professional Inquiry. Stored as AND(267740, 267782, 267783,
+    # OR(267741, 267721)) - requiring all four/five prerequisite courses.
+    # Real (https://www.massey.ac.nz/study/all-qualifications-and-degrees/
+    # master-of-arts-PMART/education-PMART1SEDCT1/, "Courses you can enrol
+    # in" > Part Two: Coursework Pathway > 267860 > Prerequisites): "One
+    # of 267740, 267782, 267783, 267741 or 267721" - the whole group is a
+    # single OR, not an AND wrapping a smaller OR. Found while trying to
+    # apply the correlated-pathway fix to Education - MA (see
+    # test_education_ma_still_has_wrong_part_two_course_codes in
+    # test_integration.py): 267740/267782/267783 don't exist in the
+    # current dataset, so the mis-scraped AND currently has no visible
+    # effect (unknown codes resolve as satisfied) - fixing it anyway for
+    # correctness, in case any of those three ever get added to the
+    # dataset in a future refresh, which would otherwise silently make
+    # this course permanently unschedulable via a compound requirement
+    # nobody intended.
+    "267860": {"op": "OR", "args": ["267740", "267782", "267783", "267741", "267721"]},
 }
 
 
@@ -533,7 +551,7 @@ _VERIFIED_QUALIFICATION_LENGTH_FIXES: dict[str, float] = {
     # 180-credit master qualification (a 240-credit MSc is also available)."
     # (https://www.massey.ac.nz/study/all-qualifications-and-degrees/master-of-science-PMSCN/)
     # 180cr is the standard/headline qualification; 240cr is a real but
-    # separate, alternate pathway the planner has no way to ask the
+    # separate, alternate pathway this project has no way to ask the
     # student about or select between (no pathway-choice input exists
     # anywhere in the planner). Defaulting to 180cr matches every subject
     # page checked so far (Chemistry, Mathematics, Animal Science,
@@ -583,7 +601,7 @@ _VERIFIED_QUALIFICATION_LENGTH_FIXES: dict[str, float] = {
     # Accountant), PMBSA Executive MBA, PMEDV Educational and Developmental
     # Psychology (240cr is the default pathway; a 180cr alternate pathway
     # exists only for candidates already holding a specific named diploma,
-    # which the planner has no way to ask about - same unresolved-pathway
+    # which this project has no way to ask about - same unresolved-pathway
     # situation as PMSCN above).
     #
     # All of the following are the identical 240-stored/180-actual pattern
@@ -662,33 +680,40 @@ def apply_verified_qualification_length_fixes(
     return out, n_fixed
 
 
-# Three majors under length-fixed qualifications hit the exact same stale-240
+# Two majors under length-fixed qualifications hit the exact same stale-240
 # arithmetic (fixed_credits + old_open_credits == 240) but produce a NEGATIVE
 # corrected value: their own explicitly-modelled, non-open pools already sum
 # to 210cr, more than the real 180cr total, even before the trailing open
-# node is touched at all. Deliberately NOT auto-corrected: unlike the other
-# 48 (a single mechanical subtraction, self-evidently required once the
-# qualification total was already verified), guessing a fix here would mean
-# inventing curriculum content without checking it, exactly what
-# _VERIFIED_PREREQ_FIXES-style corrections are meant to avoid.
+# node is touched at all. Deliberately NOT auto-corrected by this function:
+# unlike the other 48 (a single mechanical subtraction, self-evidently
+# required once the qualification total was already verified), guessing a
+# fix here would mean inventing curriculum content without checking it,
+# exactly what _VERIFIED_PREREQ_FIXES-style corrections are meant to avoid.
 #
-# Live-verified afterwards (not left as an open mystery): all three are
-# confirmed instances of the same Geography/Sociology-MA "Part One credit
-# range correlated with Part Two pathway choice" structural gap
-# (test_correlated_part_one_two_majors_not_yet_fixed in test_integration.py
-# has the full citation per major) - not a new or different bug. E.g.
-# Ecology and Conservation - MSc's own page: Part One subject courses are
-# "Choose between 30 and 60 credits from", Part Two thesis is "Choose
-# between 90 and 120 credits from" - two correlated pathways summing to
-# 180cr either way, stored here as two independent fixed-size ALL_OF
-# requirements instead. The real fix needs the same domain-model work
-# Geography's Part One still needs (representing two correlated ANY_OF
-# choices), not a data patch - see DATA_QUALITY.md.
-_UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS: frozenset[str] = frozenset({
-    "Ecology and Conservation – Master of Science",
-    "Occupational Health and Safety – Master of Health Science",
-    "Māori Health – Master of Health Science",
-})
+# Two majors used to be listed here (Occupational Health and Safety and
+# Māori Health - Master of Health Science), hitting the same stale-240
+# arithmetic and producing a NEGATIVE corrected value: their own
+# explicitly-modelled, non-open pools already summed to 210cr, more than
+# the real 180cr total, even before the trailing open node was touched.
+# Deliberately not auto-corrected by this function at the time - guessing
+# a fix would have meant inventing curriculum content without checking it.
+#
+# Both are now fixed. Live-verifying (rather than guessing) confirmed both
+# were instances of the same Geography/Sociology-MA "Part One credit range
+# correlated with Part Two pathway choice" structural gap - and that this
+# was NOT a domain-model limitation at all: AnyOfRequirement nesting
+# AllOfRequirement children already expresses two correlated choices
+# correctly, with zero code changes needed anywhere. Both majors' whole
+# requirement trees were hand re-encoded directly in majors.json (not by
+# this function), the same way as Geography, Sociology, and Ecology and
+# Conservation before them - see test_ohs_and_maori_health_correlated_
+# pathway_fixed in test_integration.py and DATA_QUALITY.md for the full
+# story. Kept as an empty frozenset (not deleted) so a future dataset
+# refresh that reintroduces the stale-240 pattern for either of these two,
+# or for any other major, has an obvious place to list it again rather
+# than silently falling through fix_stale_free_elective_pool_sizes's
+# negative-value skip with no explanation on file.
+_UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS: frozenset[str] = frozenset()
 
 
 def fix_stale_free_elective_pool_sizes(
@@ -711,10 +736,11 @@ def fix_stale_free_elective_pool_sizes(
     empirically, not assumed: every one of the 51 majors under a
     length-fixed qualification with exactly one such open node sums to
     precisely 240 (explicitly-modelled credits + the stored open-node size),
-    with zero exceptions - consistent with majors.json having derived
-    "remaining credits for free electives" from the qualification's stored
-    (wrong) total at build time, baking in a stale absolute number instead
-    of a value computed against the correct one.
+    with zero exceptions - this is exactly what you'd expect if whoever (or
+    whatever process) built majors.json derived "remaining credits for free
+    electives" from the qualification's stored (wrong) total at build time,
+    baking in a stale absolute number instead of a value computed against
+    the correct one.
 
     This is a mechanical correction, not a new claim about curriculum
     content: the open node's whole job is "whatever's left over to reach

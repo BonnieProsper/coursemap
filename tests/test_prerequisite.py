@@ -63,7 +63,6 @@ def test_nested_expression():
 import pytest
 pytest.importorskip("bs4", reason="bs4 is part of the `ingestion` extra: pip install -e '.[ingestion]'")
 
-from coursemap.domain.prerequisite import CoursePrerequisite
 from coursemap.domain.prerequisite_utils import prereqs_met
 from coursemap.ingestion.dataset_loader import parse_prereqs as _parse_prereqs
 from coursemap.ingestion.prerequisite_scraper import (

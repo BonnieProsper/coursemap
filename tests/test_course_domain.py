@@ -38,15 +38,9 @@ def test_sort_semesters_deduplicates():
 def test_sort_semesters_unknown_code_sorts_last():
     """
     An unrecognized semester code must sort after all known ones, not
-    crash and not silently land in an arbitrary position. This is the
-    actual robustness this helper provides over plain alphabetical sort:
-    a real alphabetical sort places an unrecognized code wherever its
-    characters happen to fall, e.g. a hypothetical 'B2' code (for some
-    future block-course offering occurring mid-year) would sort BEFORE
-    'S1' and 'S2' alphabetically (since 'B' < 'S'), even though nothing
-    about that code's letters says anything about when it actually falls
-    in the calendar. An explicit ordering map doesn't have that problem;
-    it puts genuinely unknown codes last rather than guessing from spelling.
+    crash and not land in an arbitrary position. A plain alphabetical
+    sort would place e.g. 'B2' before 'S1'/'S2' just because 'B' < 'S',
+    with no relation to when it actually falls in the calendar.
     """
     from coursemap.domain.course import sort_semesters
     result = sort_semesters(["S2", "B2", "S1"])

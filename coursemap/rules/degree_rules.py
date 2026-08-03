@@ -128,6 +128,50 @@ def profile_for(level: int, length: int) -> DegreeProfile:
     return DegreeProfile(total_credits=length * 120)
 
 
+# ---------------------------------------------------------------------------
+# Qualifications with a documented, prior-study-dependent credit total
+# ---------------------------------------------------------------------------
+#
+# A taught master's total is often not one fixed number - Massey states
+# generally that a master's "can be 120 credits, 180 credits or 240 credits...
+# depending on study you have done before". _DEGREE_PROFILES/profile_for above
+# can only ever return one default total per (level, length) pair, so the
+# planner has no way to represent this on its own. This table names the
+# qualifications where a real, live-verified alternate total is known, so
+# the API/CLI/UI can at least surface the ambiguity and let the student
+# supply their own total via credits_override, rather than silently
+# generating a plan against the wrong one.
+#
+# This is deliberately a small, source-cited allowlist, not a claim that
+# every qualification without an entry here has only one pathway - most
+# have simply not been checked. See DATA_QUALITY.md, "Qualification credit
+# totals".
+_QUALIFICATIONS_WITH_ALTERNATE_TOTALS: dict[str, tuple[int, ...]] = {
+    # Master of Science - 180cr is the default pathway modelled by this
+    # planner; a 240cr MSc is also offered, per the qualification's own page.
+    "PMSCN": (180, 240),
+}
+
+
+def alternate_pathway_notice(qual_code: str | None) -> str | None:
+    """
+    Return a student-facing notice if this qualification has a documented
+    alternate credit total this planner cannot determine on its own, or
+    None if it doesn't (either because there's genuinely only one pathway,
+    or because no alternate has been verified yet - the two are not
+    distinguished here, see the module docstring above).
+    """
+    totals = _QUALIFICATIONS_WITH_ALTERNATE_TOTALS.get(qual_code or "")
+    if not totals:
+        return None
+    options = " or ".join(f"{t}cr" for t in totals)
+    return (
+        "This qualification's total credits depend on your prior study "
+        f"({options} are both real pathways). This plan assumes the "
+        "default - set your own total below if you know it differs."
+    )
+
+
 
 def cap_overcaptured_required_codes(
     required_codes: set[str],
