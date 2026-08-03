@@ -66,9 +66,7 @@ def test_plan_generation():
 # ══════════════════════════════════════════════════════════════
 
 import pytest
-from coursemap.planner.generator import PlanGenerator, REBALANCE_THRESHOLD
-from coursemap.domain.course import Course, Offering
-from coursemap.domain.prerequisite import CoursePrerequisite, AndExpression
+from coursemap.domain.prerequisite import AndExpression
 
 
 def _make_offering(semester="S1", campus="D", mode="DIS"):

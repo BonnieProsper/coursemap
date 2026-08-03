@@ -677,7 +677,7 @@ class PlanGenerator:
         # load staircases that the greedy pass creates when prerequisites unlock
         # a large batch all at once.
         #
-        # IMPORTANT: equalisation only operates on semesters [0..n-2]. The final
+        # IMPORTANT: this pass only operates on semesters [0..n-2].  The final
         # semester was already tuned by Pass 1-3 above; touching it here would
         # undo that work.
         equalise_moves = self._equalise(result)

@@ -87,7 +87,7 @@ class ElectiveFiller:
                 stay unsatisfied (found via a real-dataset sweep, 10 of 25
                 sampled undergrad majors hit exactly this, including ones
                 with no other unusual structure at all, e.g. English. See
-                CHANGELOG.md, "ElectiveFiller Level-Gate Awareness").
+                CHANGELOG.md).
       Tier 3: prerequisite-chain courses. Needed (directly or transitively)
                 by something already in the plan, but not themselves part of
                 the major's requirement tree. Scheduling these as filler is

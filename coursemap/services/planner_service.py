@@ -39,7 +39,7 @@ from coursemap.planner.generator import PlanGenerator
 from coursemap.planner.elective_filler import ElectiveFiller
 from coursemap.rules.degree_rules import (
     build_degree_tree, filter_requirement_tree, profile_for,
-    cap_overcaptured_required_codes,
+    cap_overcaptured_required_codes, alternate_pathway_notice,
 )
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,7 @@ class PlannerService:
         excluded_courses: frozenset = frozenset(),
         no_summer: bool = True,
         transfer_credits: int = 0,
+        credits_override: int | None = None,
         _allow_level_progression_shortfall: bool = False,
     ) -> DegreePlan:
         """
@@ -129,6 +130,10 @@ class PlannerService:
             prior_completed:          Course codes already completed before this plan.
             preferred_electives:      Course codes to prefer when selecting electives.
             excluded_courses:         Course codes to never schedule (student opt-out).
+            credits_override:         Plan against this total credits instead of the
+                                       tool's default for the qualification. Use for a
+                                       qualification whose real total depends on prior
+                                       study (see degree_rules.alternate_pathway_notice).
 
         Returns:
             The highest-scoring valid DegreePlan found.
@@ -150,7 +155,9 @@ class PlannerService:
         parsed_majors = []
         for m in resolved:
             req_tree = self._build_major_req_tree(m)
-            degree_tree = self._build_degree_tree(m, req_tree, campus=campus, mode=mode)
+            degree_tree = self._build_degree_tree(
+                m, req_tree, campus=campus, mode=mode, credits_override=credits_override,
+            )
             qual = self._qual_map.get(m["name"])
             parsed_majors.append({
                 "name": m["name"],
@@ -203,12 +210,15 @@ class PlannerService:
         major_name: str,
         campus: str = "D",
         mode: str = "DIS",
+        credits_override: int | None = None,
     ) -> RequirementNode | None:
         """
         Return the full degree requirement tree for a named major.
 
         Returns None when the name matches zero or more than one major so the
         caller can skip validation gracefully without raising.
+
+        `credits_override`: see generate_best_plan.
         """
         try:
             resolved = self._resolve_major(major_name)
@@ -223,7 +233,29 @@ class PlannerService:
             campus=campus,
             mode=mode,
             keep_open_pools=True,
+            credits_override=credits_override,
         )
+
+    def pathway_notice_for_major(self, major_name: str) -> str | None:
+        """
+        Return a student-facing notice if this major's qualification has a
+        documented, prior-study-dependent credit total this planner can't
+        determine on its own (e.g. Master of Science's 180cr/240cr split),
+        or None if resolution is ambiguous or no such notice applies.
+
+        See degree_rules.alternate_pathway_notice for what this does and
+        does not cover.
+        """
+        try:
+            resolved = self._resolve_major(major_name)
+        except ValueError:
+            return None
+        if len(resolved) != 1:
+            return None
+        qual = self._qual_map.get(resolved[0]["name"])
+        if qual is None:
+            return None
+        return alternate_pathway_notice(qual.get("qual_code"))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -363,6 +395,7 @@ class PlannerService:
         campus: str = "D",
         mode: str = "DIS",
         keep_open_pools: bool = False,
+        credits_override: int | None = None,
     ) -> RequirementNode:
         """
         Derive the full degree requirement tree for this major, filtered to the
@@ -385,13 +418,21 @@ class PlannerService:
         an unfilled base plan and should leave this False, since the open
         pool would always fail against a plan that hasn't had electives
         added yet.
+
+        `credits_override`: when given, use this as the degree's total
+        credits instead of the default derived from qual_level/qual_length.
+        For a student whose qualification has a documented prior-study-
+        dependent total (see degree_rules.alternate_pathway_notice), this
+        is the only way to plan against their actual pathway rather than
+        the tool's single default.
         """
 
         name = major["name"]
         qual = self._qual_map.get(name)
         if qual is None:
             logger.warning("No qualification found for '%s'; using 360cr fallback.", name)
-            return AllOfRequirement((TotalCreditsRequirement(360), major_req))
+            fallback_total = credits_override if credits_override is not None else 360
+            return AllOfRequirement((TotalCreditsRequirement(fallback_total), major_req))
 
         all_codes = collect_course_codes(major_req)
 
@@ -429,7 +470,10 @@ class PlannerService:
             kept_codes, was_capped = cap_overcaptured_required_codes(
                 required_codes=required_codes_for_cap,
                 pool_nodes=elective_nodes_for_cap,
-                degree_total=profile_for(qual["level"], qual["length"]).total_credits,
+                degree_total=(
+                    credits_override if credits_override is not None
+                    else profile_for(qual["level"], qual["length"]).total_credits
+                ),
                 course_credits=course_credits,
                 course_levels=course_levels,
                 schedulable_codes=schedulable_codes,
@@ -484,6 +528,7 @@ class PlannerService:
             qual_length=qual["length"],
             major_name=name,
             schedulable_major_credits=schedulable_credits,
+            override_total_credits=credits_override,
         )
 
     def generate_double_major_plan(
@@ -689,9 +734,12 @@ class PlannerService:
         excluded_courses: frozenset = frozenset(),
         no_summer: bool = True,
         transfer_credits: int = 0,
+        credits_override: int | None = None,
     ) -> tuple["DegreePlan", list[str]]:
         """
         Generate a plan and auto-fill the free-elective gap with subject-area courses.
+
+        `credits_override`: see generate_best_plan.
 
         Returns (filled_plan, filler_codes) where filler_codes are the course
         codes added to fill the gap.  If the gap is zero the plan is returned
@@ -724,6 +772,7 @@ class PlannerService:
             preferred_electives=preferred_electives,
             excluded_courses=excluded_courses,
             no_summer=no_summer,
+            credits_override=credits_override,
             # This is a discovery pass: its only purpose is to find out how
             # many credits the major's required/named-pool structure can
             # guarantee on its own, so the real gap (to be filled with
@@ -930,9 +979,10 @@ class PlannerService:
                 # degree credit target, so PlanSearch must schedule all of them.
                 # Reduce degree target by transfer_credits so internal
                 # PlanSearch validation passes when transfer covers part of 360cr.
-                _effective_target_credits = (
-                    qual["length"] * 120 - transfer_credits
+                _default_target_credits = (
+                    credits_override if credits_override is not None else qual["length"] * 120
                 )
+                _effective_target_credits = _default_target_credits - transfer_credits
                 degree_tree = _bdt(
                     major_req=filtered_aug,
                     qual_level=qual["level"],
@@ -940,10 +990,16 @@ class PlannerService:
                     major_name=name_m,
                     schedulable_major_credits=schedulable_aug_credits,
                     force_total_credits=True,
-                    override_total_credits=_effective_target_credits if transfer_credits > 0 else None,
+                    override_total_credits=(
+                        _effective_target_credits
+                        if (transfer_credits > 0 or credits_override is not None)
+                        else None
+                    ),
                 )
             else:
-                degree_tree = self._build_degree_tree(m, req_tree, campus=campus, mode=mode)
+                degree_tree = self._build_degree_tree(
+                    m, req_tree, campus=campus, mode=mode, credits_override=credits_override,
+                )
 
             parsed_majors_filled.append({
                 "name":         m["name"],
@@ -1131,13 +1187,18 @@ class PlannerService:
     def degree_total_credits(
         self,
         major_name: str,
+        credits_override: int | None = None,
     ) -> int:
         """
         Return the total credit target for the degree associated with this major.
 
         Uses the qualification's level and length to look up the standard Massey
         credit profile. Falls back to 360 when qualification metadata is missing.
+
+        `credits_override`: see generate_best_plan. Returned as-is when given.
         """
+        if credits_override is not None:
+            return credits_override
         resolved = self._resolve_major(major_name)
         if not resolved:
             return 360
@@ -1181,6 +1242,7 @@ class PlannerService:
         major_name: str,
         campus: str = "D",
         mode: str = "DIS",
+        credits_override: int | None = None,
     ) -> int:
         """
         Return the number of additional free-elective credits needed beyond the
@@ -1196,6 +1258,8 @@ class PlannerService:
         all alternatives in a pool, which would overcount).
 
         Returns 0 when the major data fully covers the degree credit target.
+
+        `credits_override`: see generate_best_plan.
         """
         resolved = self._resolve_major(major_name)
         if not resolved:
@@ -1235,8 +1299,11 @@ class PlannerService:
             pool_credits += min(target, schedulable_in_pool)
 
         schedulable = req_credits + pool_credits
-        profile = profile_for(qual["level"], qual["length"])
-        return max(0, profile.total_credits - schedulable)
+        target_total = (
+            credits_override if credits_override is not None
+            else profile_for(qual["level"], qual["length"]).total_credits
+        )
+        return max(0, target_total - schedulable)
 
     def campus_excluded_courses(
         self,
@@ -1381,9 +1448,8 @@ class PlannerService:
         major's own level-progression gate, instead of just filling the
         credit gap with whatever's cheapest. Without this, the credit TOTAL
         can come out exactly right while the major's named pools remain
-        unsatisfied. See CHANGELOG.md, "ElectiveFiller Level-Gate
-        Awareness", for how this was found (a 25-major sample showed 10 hit
-        exactly this).
+        unsatisfied. See CHANGELOG.md for how this was found (a 25-major
+        sample showed 10 hit exactly this).
 
         level_floor_priority: {level: shortfall_credits} from
         _level_distribution_state, e.g. {300: 15} if the plan is 15cr short

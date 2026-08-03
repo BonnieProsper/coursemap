@@ -35,6 +35,7 @@ import logging
 import math
 import re
 from collections.abc import Iterable
+from collections import defaultdict
 
 from coursemap.domain.course import Course
 from coursemap.domain.plan import DegreePlan
@@ -800,7 +801,7 @@ class PlanSearch:
 
         plan = self._trim_plan_to_credit_target(
             plan, degree_total, required_codes, always_include_in_pool,
-            elective_codes, self.preferred_electives,
+            elective_codes, self.preferred_electives, elective_nodes,
         )
 
 
@@ -880,9 +881,10 @@ class PlanSearch:
             # for exactly that reason, not for an unrelated offering/
             # restriction/prerequisite problem. Tolerating "Missing required
             # course X" specifically for those codes, and no others, is what
-            # lets a required course behind an otherwise-unreachable gate be
-            # deferred until generate_filled_double_major_plan supplies the
-            # missing foundation credit.
+            # lets a required course sitting behind a gate neither major's
+            # own courses can ever close on their own get deferred out here
+            # and picked up for real once generate_filled_double_major_plan's
+            # filler step supplies the missing foundation credit.
             deferred_missing = [
                 e for e in result.errors
                 if e.startswith("Missing required course ")
@@ -956,6 +958,7 @@ class PlanSearch:
         always_include_in_pool: set[str],
         elective_codes,
         preferred_electives,
+        elective_nodes: list[ChooseCreditsRequirement] | None = None,
     ) -> DegreePlan:
         """
         Trim an over-generated plan down to the major's exact credit target.
@@ -967,14 +970,37 @@ class PlanSearch:
 
         Pass 1 removes elective-pool courses first (highest level first),
         since a pool has alternates and losing one member doesn't break
-        anything else. Pass 2 removes non-pool "extra" courses that were
-        only pulled in as someone else's prerequisite, recomputing what's
-        still needed from the plan as it stands *after* pass 1 (an extra
-        needed only by a pool course pass 1 just removed is correctly still
-        removable; one needed by a surviving pool course is protected).
+        anything else - unless removing a member would drop its own pool's
+        already-satisfied credit target below that target, in which case it
+        is skipped and the next removable candidate is tried instead (see
+        elective_nodes below). Pass 2 removes non-pool "extra" courses that
+        were only pulled in as someone else's prerequisite, recomputing
+        what's still needed from the plan as it stands *after* pass 1 (an
+        extra needed only by a pool course pass 1 just removed is correctly
+        still removable; one needed by a surviving pool course is
+        protected).
 
         Required courses, always-include-in-pool courses, and
         preferred_electives are never removed.
+
+        elective_nodes: the pool definitions (credit target + course_codes)
+        this plan's elective_codes were selected from. Without this, Pass 1
+        only sees a single flat set of "pool courses" with no idea which
+        courses belong to which pool or what each pool still needs -  a
+        course that happens to be the sole (or last) schedulable member
+        satisfying its own pool's target gets removed anyway whenever the
+        *degree-wide* overshoot happens to be smaller than that course's
+        own credits, silently zeroing out that pool's coverage instead of
+        trimming genuine excess (confirmed via Financial Analytics and
+        Research - Master of Finance: an 800-level 60cr "Research Report",
+        the sole schedulable member covering its pool's entire 60cr target,
+        was being removed to fix a 15cr degree-total overshoot - dropping
+        that pool from 60/60cr met to 0/60cr, with generic filler silently
+        replacing it afterward instead of the actual requirement being
+        met - see CHANGELOG.md). Optional and defaults to None so existing
+        callers (and this function's own unit tests) that don't have a
+        multi-pool-with-shared-candidates shape to worry about keep working
+        unchanged; when None, this protection is skipped exactly as before.
         """
         # Trim plan to degree_total credits.
         # The working-set prereq expansion may add more courses than needed.
@@ -1077,6 +1103,37 @@ class PlanSearch:
                 )
                 removed: set[str] = set()
                 remaining_excess = excess
+
+                # Per-pool schedulable-credit tracking (see elective_nodes in
+                # the docstring above). Skipped entirely when elective_nodes
+                # wasn't provided - existing behaviour, unchanged.
+                plan_codes_now = {c.code for s in plan.semesters for c in s.courses}
+                pool_sched_credits: dict[int, int] = {}
+                node_by_id: dict[int, ChooseCreditsRequirement] = {}
+                nodes_by_code: dict[str, list[int]] = defaultdict(list)
+                if elective_nodes:
+                    for node in elective_nodes:
+                        if node.credits <= 0:
+                            continue
+                        node_id = id(node)
+                        node_by_id[node_id] = node
+                        pool_sched_credits[node_id] = sum(
+                            self.courses[c].credits for c in node.course_codes
+                            if c in plan_codes_now and c in self.courses
+                        )
+                        for code in node.course_codes:
+                            nodes_by_code[code].append(node_id)
+
+                def _would_break_own_pool(code: str, credits: int) -> bool:
+                    return any(
+                        pool_sched_credits[node_id] - credits < node_by_id[node_id].credits
+                        for node_id in nodes_by_code.get(code, [])
+                    )
+
+                def _decrement_pool_credits(code: str, credits: int) -> None:
+                    for node_id in nodes_by_code.get(code, []):
+                        pool_sched_credits[node_id] -= credits
+
                 # Pass 1: remove pool courses first (they have alternates,
                 # so they're the right place to look for excess before
                 # touching prerequisite-chain extras).
@@ -1085,16 +1142,26 @@ class PlanSearch:
                         break
                     if candidate.code in removed:
                         continue
+                    if _would_break_own_pool(candidate.code, candidate.credits):
+                        continue
                     partner_code = pair_of.get(candidate.code)
                     if partner_code and partner_code not in removed:
                         partner_course = plan_course_by_code.get(partner_code)
+                        if partner_course and _would_break_own_pool(
+                            partner_code, partner_course.credits
+                        ):
+                            continue
                         removed.add(candidate.code)
                         removed.add(partner_code)
+                        _decrement_pool_credits(candidate.code, candidate.credits)
+                        if partner_course:
+                            _decrement_pool_credits(partner_code, partner_course.credits)
                         remaining_excess -= candidate.credits + (
                             partner_course.credits if partner_course else 0
                         )
                     else:
                         removed.add(candidate.code)
+                        _decrement_pool_credits(candidate.code, candidate.credits)
                         remaining_excess -= candidate.credits
                 # Pass 2: recompute what's still needed from the SURVIVING
                 # plan (pool removals already applied) before deciding which
@@ -1533,7 +1600,7 @@ class PlanSearch:
             as a clear scheduling error.
           - allow_shortfall=True: the unschedulable higher-level selections
             are dropped from the set instead, leaving the affected pool(s)
-            short of their own credit target for this attempt.
+            short of their own credit target in this pass.
 
         always_keep: required (non-pool) codes and always-include codes,
         never removed by the swap (or the allow_shortfall drop), even if
@@ -1712,9 +1779,9 @@ class PlanSearch:
                 # which level to specifically prioritise, so the gap it fills
                 # actually closes the gate instead of just hitting the right
                 # credit TOTAL with the wrong levels (the bug this whole
-                # mechanism exists to fix. See CHANGELOG.md, "ElectiveFiller
-                # Level-Gate Awareness"). Accumulate rather than overwrite,
-                # in case multiple gates are short across repair iterations.
+                # mechanism exists to fix. See CHANGELOG.md). Accumulate
+                # rather than overwrite, in case multiple gates are short
+                # across repair iterations.
                 self.last_needed_levels[shortfall_gate_level] = (
                     self.last_needed_levels.get(shortfall_gate_level, 0) + shortfall_amount
                 )

@@ -18,8 +18,6 @@ from coursemap.domain.prerequisite_utils import prereqs_met
 from coursemap.ingestion.dataset_loader import (
     normalize_campus as _normalize_campus,
     normalize_mode as _normalize_mode,
-    _SEMESTER_MAP,
-    _MULTI_SEMESTER_MAP,
     parse_offerings as _parse_offerings,
 )
 from coursemap.planner.generator import PlanGenerator, PlanStats
@@ -379,7 +377,7 @@ class TestPlanStats:
             "B": _course("B", offerings=_off("S2")),
         }
         gen = PlanGenerator(courses)
-        plan = gen.generate()
+        gen.generate()
         assert gen.stats.courses_scheduled == 2
         assert gen.stats.semesters_generated == 2
 
@@ -439,62 +437,10 @@ class TestRebalance:
 
     def test_rebalance_pulls_flexible_course_into_final(self):
         """
-        5 S1-only courses (15cr each), max 60cr.
-        Greedy: S1[A,B,C,D](60cr), S1[E](15cr); underfilled.
-        C is also offered in S2, so a different course (C) can be deferred
-        to make room; but actually here we need a course that can move INTO
-        the final S1 from an earlier semester.
-
-        Better setup: 5 courses, max 45cr.
-          A: S1+S2 (flexible)
-          B: S1 only
-          C: S1 only
-          D: S1 only
-          E: S1 only
-        Greedy (sorted alpha): S1[A,B,C](45cr), S1[D,E](30cr).
-        Final = 30cr; no rebalance needed.
-
-        Real underfill case: 5 courses, max 45cr, last course S1-only,
-        first four S1-only filling exactly 45cr.
-          A,B,C: S1 only (45cr fills first S1)
-          D: S1+S2 (flexible; in first S1, also offered S2)
-          E: S1 only (stranded alone in second S1 = 15cr)
-        Greedy: S1[A,B,C](45cr); D doesn't fit (60cr > 45)
-        Next S1: S1[D,E](30cr); fine actually, not underfilled.
-
-        Use 6 courses to force an underfill:
-          A,B,C,D: S1 only (4 * 15 = 60cr fills S1 to cap when max=60)
-          E: S1+S2 (flexible, also in first S1)
-          F: S1 only (stranded alone in second S1)
-        Greedy: S1 2026[A,B,C,D](60cr), E and F go to next S1.
-        S1 2027[E,F](30cr); not underfilled (30 = threshold, not < threshold).
-
-        Must use max=45 to force underfill:
-          A,B,C: S1-only (45cr fills S1)
-          D: S1+S2 (flexible, goes to next S1 since A,B,C fill it)
-          E: S1-only (stranded alone)
-        Greedy: S1 2026[A,B,C](45cr), S1 2027[D,E](30cr). Not underfilled.
-
-        Must have 5 courses, max 45, where alphabetical fill creates < 30cr final:
-          A,B,C,D: S1-only (sorted first, fill 45 = ABC, D overflows)
-          E: S1+S2 (also fills to next S1 as 5th course)
-        Greedy: S1 2026[A,B,C](45cr), S1 2027[D,E](30cr). Still 30cr, not < 30.
-
-        Use 7 courses max=60 where 1 is S1-only and the rest fill 6 * 15 = 90 > 60+15:
-          A,B,C,D: S1-only sorted first (fill 60cr exactly)
-          E: S1+S2
-          F: S1-only
-          G: S1-only
-        Greedy: S1 2026[A,B,C,D](60), S1 2027[E,F,G](45). Fine.
-
-        The SIMPLEST underfill case: 5 S1-only courses, max 60, 
-        where only 4 fit in S1 and the 5th is alone. Already done above.
-        The issue is 30cr = threshold is NOT underfilled (< 30 is the condition).
-        So 1 course at 15cr alone is the minimum underfill.
-
-        Let's verify with the exact fixture from the analysis:
-        5 courses at 15cr, max 60, all S1-only -> S1[A,B,C,D](60), S1[E](15) <- 15 < 30!
-        One of A-D must be S1+S2 to be movable into the final S1.
+        5 courses at 15cr, max 60cr, all S1-only except CCC (also offered S2).
+        Greedy fills the first S1 with 4 courses (60cr) and leaves a lone
+        15cr underfilled final S1. Since CCC is also offered in S2, it can
+        move from the earlier S1 into the final one, bringing it to 30cr.
         """
         courses = {
             "AAA": Course("AAA", "Alpha",   15, 100, self._off("S1")),
@@ -702,7 +648,7 @@ class TestRebalance:
             "EEE": Course("EEE", "E", 15, 100, self._off("S1")),
         }
         gen = PlanGenerator(courses, max_credits_per_semester=60)
-        plan = gen.generate()
+        gen.generate()
         # CCC should be moved from prior S1 to final S1
         assert gen.stats.rebalance_moves == 1
 
@@ -778,23 +724,11 @@ class TestRebalance:
         Pass 3 merges freely when neither final course requires a penultimate course.
         """
         courses = {
-            "A": Course("A", "A", 15, 100, self._off("S1")),
-            "B": Course("B", "B", 15, 100, self._off("S1")),
-            "C": Course("C", "C", 15, 100, self._off("S1")),
-        }
-        # max=30: S1[A,B](30), S1[C](15) → merge: [A,B,C](45) > 30, no merge
-        # max=60: all three fit in one S1 → no rebalance needed
-        # Use max=45: S1[A,B,C](45) → one semester, no rebalance
-        # Use 4 courses, max=45: S1[A,B,C](45), S1[D](15) → merge [A..D](60)>45 no
-        # Simplest: 2 independent S2 courses that don't form a prereq pair
-        courses2 = {
             "X": Course("X", "X", 15, 100, self._off("S2")),
             "Y": Course("Y", "Y", 15, 100, self._off("S2")),
         }
-        gen = PlanGenerator(courses2, max_credits_per_semester=60)
+        gen = PlanGenerator(courses, max_credits_per_semester=60)
         plan = gen.generate()
-        # Both offered only in S2. Greedy: X in S2 yr1, Y in S2 yr1 (same semester).
-        # If they go into the same semester, fine. Just assert total is right.
         assert plan.total_credits() == 30
         all_codes = {c.code for s in plan.semesters for c in s.courses}
         assert all_codes == {"X", "Y"}

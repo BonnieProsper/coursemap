@@ -79,9 +79,9 @@ def _plan(svc, name, **kwargs):
 
 
 # Shared xfail reason for majors affected by the 45cr level-progression rule's
-# remaining architecture gap (see DATA_QUALITY.md, "The 45cr Level-Progression
-# Rule", and CHANGELOG.md, "Base/Filled-Plan Architecture Fix"). Defined near
-# the top of the file since several tests across different sections need it.
+# remaining architecture gap (see DATA_QUALITY.md, "45-credit level-progression
+# rule"). Defined near the top of the file since several tests across
+# different sections need it.
 _LEVEL_PROGRESSION_KNOWN_LIMITATION = (
     "KNOWN LIMITATION (see DATA_QUALITY.md '45cr level-progression rule'): "
     "this major's named elective pools cannot, on their own, supply enough "
@@ -93,17 +93,27 @@ _LEVEL_PROGRESSION_KNOWN_LIMITATION = (
     "DegreeValidator's ChooseCreditsRequirement check only counts a "
     "pool's own listed course_codes (see coursemap/validation/engine.py), "
     "so generic same-level filler from outside the major, however well "
-    "prioritised, structurally cannot satisfy it. An ElectiveFiller "
-    "level-gate-aware tier was built and tested (see "
-    "PlannerService.last_needed_levels / ElectiveFiller's needed_levels), "
-    "it correctly biases filler toward the needed level, but that's a "
-    "different pool of courses than the one the validator actually checks, "
-    "so it cannot close THIS specific kind of gap no matter how it's tuned. "
-    "Properly fixing this needs either schema changes (letting a course "
-    "count toward a named pool's target even when sourced from outside the "
-    "major) or a data-modelling correction (the named pool's course list "
-    "may not be the only way Massey intends to satisfy it), not a smarter "
-    "filler. Left as a documented limitation rather than worked around."
+    "prioritised, structurally cannot satisfy it. "
+    "CORRECTION: this reason previously claimed the only real fix was "
+    "schema changes or a data-modelling correction, \"not a smarter "
+    "filler.\" That was wrong for 7 of the 9 majors this reason was "
+    "applied to (Ecology - BSc, Accountancy - BBus x2 tests, Psychology/"
+    "Creative Writing/Finance-BBus/Education - BA) - their real blocker "
+    "was an unrelated bug in _trim_plan_to_credit_target, which could "
+    "remove a pool's sole covering course to fix a small degree-total "
+    "overshoot, zeroing out that pool's coverage entirely rather than "
+    "trimming genuine excess (found via Financial Analytics and Research "
+    "- Master of Finance, see CHANGELOG.md). Fixing that trim bug "
+    "made all 7 genuinely pass - no schema change, no data-modelling "
+    "correction, no smarter filler was needed. Still genuinely accurate "
+    "for the 2 majors below still using this reason (English/Chinese/"
+    "Japanese - BA): their own required-plus-pool courses cannot reach "
+    "45cr at the level below even in principle, a real shortfall the "
+    "trim fix cannot manufacture credits around. The lesson: an "
+    "explanation that sounds mechanistically complete is still a theory "
+    "until checked against each specific case - this got checked only "
+    "after a distinct, initially-unrelated investigation (Finance) "
+    "forced it, not before."
 )
 
 
@@ -236,7 +246,6 @@ def test_bsc_computer_science_gap_reported(svc):
     assert gap > 0, "CS BSc should have a free-elective gap"
 
 
-@pytest.mark.xfail(reason=_LEVEL_PROGRESSION_KNOWN_LIMITATION, strict=True)
 def test_bsc_ecology_distance_plan(svc):
     """Ecology BSc produces a valid plan for distance students.
 
@@ -253,14 +262,17 @@ def test_bsc_ecology_distance_plan(svc):
     Uses generate_filled_plan rather than generate_best_plan (_plan helper):
     Ecology's named elective pools cannot, on their own, supply enough L200
     credit to justify its L300 pool under the general Massey 45cr
-    level-progression rule (verified mathematically unsolvable from named
-    pools alone earlier in this audit, see DATA_QUALITY.md). Still xfail:
-    even generate_filled_plan's filler step doesn't reliably close this
-    specific gap yet, because ElectiveFiller's ranking doesn't know to
-    specifically prioritise the exact level needed to satisfy a still-open
-    level-progression gate, it just ranks by (tier, level, code), so a
-    surplus of cheap L100 filler can crowd out the handful of L200 courses
-    that would actually unlock the major's L300 pool. See CHANGELOG.md.
+    level-progression rule. Previously xfail'd on the theory that this was
+    fundamentally unfixable without schema changes (see the old
+    _LEVEL_PROGRESSION_KNOWN_LIMITATION text, still accurate for the
+    majors that still need it below) - that theory was wrong for this
+    major specifically. The real cause was a distinct, unrelated bug in
+    _trim_plan_to_credit_target: it could remove a pool's sole covering
+    course to fix a small degree-total overshoot, silently zeroing out
+    that pool's coverage instead of trimming harmless excess (found and
+    fixed via Financial Analytics and Research - Master of Finance, see
+    CHANGELOG.md). Genuinely passes now that trim protects a pool from
+    being emptied below its own target.
     """
     name = "Ecology and Conservation – Bachelor of Science"
     # Must allow Summer School: 123103 is only offered DIS in SS
@@ -306,20 +318,22 @@ def test_ba_english_free_elective_gap(svc):
 # BBus (complete data)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(reason=_LEVEL_PROGRESSION_KNOWN_LIMITATION, strict=True)
 def test_bbus_accountancy_plan_is_valid(svc):
     """
     Accountancy has no required (non-pool) courses at all. Its entire
-    specialisation comes from named elective pools that, like Ecology and
-    Psychology, cannot on their own supply enough lower-level credit to
-    justify their higher-level selections under the general Massey 45cr
-    level-progression rule. generate_filled_plan does not raise for this
-    major, but the resulting plan is still genuinely wrong: its named L200
-    and L300 pools end up at 0cr selected (the filler step fills the credit
-    GAP with cheap L100 courses instead, since ElectiveFiller's ranking
-    doesn't yet know to specifically prioritise the level a still-open
-    level-progression gate needs, see CHANGELOG.md). Confirmed via
-    keep_open_pools=True validation, which a credits-only check would miss.
+    specialisation comes from named elective pools that, like Ecology,
+    cannot on their own supply enough lower-level credit to justify their
+    higher-level selections under the general Massey 45cr level-progression
+    rule. Previously xfail'd on the theory that fixing this needed schema
+    changes (the filler can't satisfy a specific named pool from outside
+    it) - true as a general limitation, but not what was actually breaking
+    this major. The real cause was _trim_plan_to_credit_target removing a
+    pool's sole covering course to fix a small degree-total overshoot,
+    zeroing the pool out entirely rather than trimming genuine excess
+    (found via Financial Analytics and Research - Master of Finance, see
+    CHANGELOG.md). Genuinely passes now that trim protects a pool from
+    being emptied below its own target. Confirmed via keep_open_pools=True
+    validation, which a credits-only check would miss.
     """
     name = "Accountancy – Bachelor of Business"
     plan, _filler = svc.generate_filled_plan(name, campus="D", mode="DIS", no_summer=True)
@@ -327,7 +341,6 @@ def test_bbus_accountancy_plan_is_valid(svc):
     assert _validate(svc, plan, name, keep_open_pools=True).passed
 
 
-@pytest.mark.xfail(reason=_LEVEL_PROGRESSION_KNOWN_LIMITATION, strict=True)
 def test_bbus_no_duplicate_courses(svc):
     plan, _filler = svc.generate_filled_plan(
         "Accountancy – Bachelor of Business", campus="D", mode="DIS", no_summer=True,
@@ -367,8 +380,6 @@ def test_bconstruction_honours_plan(svc):
     assert plan.total_credits() > 0
     result = _validate(svc, plan, name)
     if not result.passed:
-        # Allow small shortfall if only free-elective pool is short
-        pool_errors = [e for e in result.errors if 'Elective pool' in e or 'below required' in e]
         assert all('below required' not in e for e in result.errors), f"Credit shortfall: {result.errors}"
     # Verify the oversized course appears alone in its semester
     has_oversized_sem = any(
@@ -556,7 +567,7 @@ def test_no_phantom_prerequisites(svc):
     scraper and should have been removed at load time.
     """
     from coursemap.domain.prerequisite import (
-        AndExpression, CoursePrerequisite, OrExpression,
+        CoursePrerequisite,
     )
 
     def collect(expr) -> set[str]:
@@ -586,7 +597,6 @@ def test_cs_prerequisite_chain_is_clean(svc):
     cs = svc.courses
     # 159201 Algorithms requires 159102 (not phantom 159271)
     assert cs["159201"].prerequisites is not None
-    from coursemap.domain.prerequisite import CoursePrerequisite, AndExpression
     refs = cs["159201"].prerequisites.required_courses()
     assert "159102" in refs, "159201 should require 159102"
     assert "159271" not in refs, "159271 is a phantom code and should be stripped"
@@ -851,14 +861,12 @@ def test_no_summer_skips_ss_semesters(svc):
 
 
 def test_no_summer_false_may_include_ss(svc):
-    """Without --no-summer, SS semesters are allowed (Psychology BSc uses one)."""
+    """no_summer=False must not break generation, even for a major that doesn't need SS."""
     plan_with_ss = svc.generate_best_plan(
         "Psychology – Bachelor of Science",
         no_summer=False,
         max_credits_per_semester=30,
     )
-    sem_types = {s.semester for s in plan_with_ss.semesters}
-    # Part-time Psychology uses Summer School. At least check plan generates.
     assert len(plan_with_ss.semesters) > 0
 
 
@@ -1192,9 +1200,8 @@ def test_schema_validation_rejects_bad_majors(svc):
 # ---------------------------------------------------------------------------
 
 def test_transfer_credits_reduces_gap(svc):
-    """Transfer credits should reduce the reported free-elective gap."""
+    """transfer_credits is recorded on the plan and included in all_prior_credits."""
     name = "Computer Science – Bachelor of Science"
-    base_gap = svc.free_elective_gap(name)
 
     plan_no_transfer = svc.generate_best_plan(name)
     assert plan_no_transfer.transfer_credits == 0
@@ -1780,27 +1787,66 @@ def test_specialist_teaching_majors_schedule_zero_credit_requirement(svc, name, 
 
 @pytest.mark.parametrize("name,campus,mode", [
     ("Computer Science – Bachelor of Information Sciences", "D", "DIS"),
-    pytest.param(
-        "Psychology – Bachelor of Arts", "D", "DIS",
-        marks=pytest.mark.xfail(reason=_LEVEL_PROGRESSION_KNOWN_LIMITATION, strict=True),
-    ),
-    pytest.param(
-        "Creative Writing – Bachelor of Arts", "D", "DIS",
-        marks=pytest.mark.xfail(reason=_LEVEL_PROGRESSION_KNOWN_LIMITATION, strict=True),
-    ),
+    ("Psychology – Bachelor of Arts", "D", "DIS"),
+    ("Creative Writing – Bachelor of Arts", "D", "DIS"),
     pytest.param(
         "Chinese – Bachelor of Arts", "D", "DIS",
-        marks=pytest.mark.xfail(reason=_LEVEL_PROGRESSION_KNOWN_LIMITATION, strict=True),
+        marks=pytest.mark.xfail(
+            reason=(
+                "NOT the level-progression limitation, despite being "
+                "grouped with it before this was checked directly - and "
+                "NOT a data-scraping error either, fully investigated now. "
+                "generate_best_plan fails outright with 'No schedulable "
+                "courses remain (3 blocked)': 241304 and 241305 both "
+                "require 241301 AND 241302 as prerequisites, but 241301's "
+                "own restriction list names 241302 (confirmed against "
+                "Massey's raw prescriptions text, not just the scraped "
+                "JSON: '241301 ... P 241202 ... R 241302' / '241302 ... "
+                "P 241301 ... R 241341, 241342, ...' - the restriction is "
+                "asymmetric and genuinely Massey's own data, e.g. also "
+                "listed identically across the Bachelor of Communication, "
+                "Diploma in Arts, and Chinese - Diploma in Arts regulation "
+                "pages). This is a real Massey curriculum quirk, not a "
+                "bug in the scrape: a 'restriction' at Massey means "
+                "'credits toward your qualification for only one of "
+                "these', not 'you may not enrol in both' - a real student "
+                "can complete both 241301 and 241302 to satisfy 241304/"
+                "241305's prerequisite (enrollment eligibility), while "
+                "only one of the two counts toward the major's required-"
+                "course credit total (the other becomes effectively "
+                "extra, uncounted credit). This tool's restriction check "
+                "(would_restriction_conflict in prerequisite_utils.py) "
+                "currently treats a restriction as an absolute mutual-"
+                "exclusion on being scheduled at all, correct for the "
+                "overwhelming majority of restriction pairs (genuine "
+                "content-overlap 'pick one') but wrong for this specific "
+                "pattern, where the restricted pair is ALSO a joint "
+                "prerequisite for a later course. Properly fixing this "
+                "needs the scheduler to distinguish 'enrolled to satisfy "
+                "someone else's prerequisite' from 'enrolled to count "
+                "toward my own required-course credit' - a real domain-"
+                "model gap, not a quick patch, and not something to "
+                "special-case around this one course pair without that "
+                "distinction existing generally (loosening the "
+                "restriction check outright would let both 241301 and "
+                "241302 wrongly count toward the degree total, which "
+                "Massey's own data says shouldn't happen). Checked "
+                "systemically, not assumed to be a one-off: scanned every "
+                "course's prerequisite expression for the same pattern "
+                "(mirroring the real parser's exact OR(X, None) -> bare-X "
+                "collapsing) - found exactly one more instance in the "
+                "whole ~2,766-course dataset (297201/159100/159101, in "
+                "Data Science/IT/Software Engineering/AI - BInfSci), but "
+                "it's a pool option with alternatives everywhere it "
+                "appears, so it never hard-blocks a plan the way "
+                "Chinese's bare-required pair does. Genuinely rare."
+            ),
+            strict=True,
+        ),
     ),
-    pytest.param(
-        "Finance – Bachelor of Business", "D", "DIS",
-        marks=pytest.mark.xfail(reason=_LEVEL_PROGRESSION_KNOWN_LIMITATION, strict=True),
-    ),
+    ("Finance – Bachelor of Business", "D", "DIS"),
     ("Mathematics – Bachelor of Science",                   "D", "DIS"),
-    pytest.param(
-        "Education – Bachelor of Arts", "D", "DIS",
-        marks=pytest.mark.xfail(reason=_LEVEL_PROGRESSION_KNOWN_LIMITATION, strict=True),
-    ),
+    ("Education – Bachelor of Arts", "D", "DIS"),
     pytest.param(
         "Japanese – Bachelor of Arts", "D", "DIS",
         marks=pytest.mark.xfail(
@@ -1824,7 +1870,7 @@ def test_filled_plan_reaches_degree_target(svc, name, campus, mode):
     satisfy the major's own named elective pools, not just sum to the
     right number using whatever filler happened to be cheapest. The latter
     is a real, distinct failure mode this test used to miss entirely (see
-    CHANGELOG.md, "Base/Filled-Plan Architecture Fix"): several majors with
+    CHANGELOG.md): several majors with
     pool-only specialisation (no required, non-pool courses at all) can
     have generate_filled_plan succeed (no exception, exact credit total)
     while their named L200/L300 pools sit at 0cr selected, because the
@@ -1990,10 +2036,10 @@ def test_filler_excludes_major_pool_codes(svc):
     Does not compare against a plain generate_best_plan() call: that call
     always uses the default (strict) level-progression enforcement, but
     generate_filled_plan's internal discovery pass uses
-    _allow_level_progression_shortfall=True (see CHANGELOG.md, "Base/
-    Filled-Plan Architecture Fix"), for majors affected by that rule, the
-    two calls can legitimately select different courses, since the
-    strict call may include named-pool selections the tolerant discovery
+    _allow_level_progression_shortfall=True (see CHANGELOG.md), for majors
+    affected by that rule, the two calls can legitimately select different
+    courses, since the strict call may include named-pool selections the
+    tolerant discovery
     pass had to drop. This test must reproduce the SAME discovery-pass call
     generate_filled_plan makes internally, or it isn't actually testing the
     real overlap-prevention logic (extra_exclude / major_pool_codes in
@@ -2456,12 +2502,12 @@ def test_ma_majors_include_exactly_one_part_two_path(svc):
     pools). Fixed in majors.json using ANY_OF.
 
     Getting here needed two prerequisite bug fixes in search.py, not
-    just the ANY_OF re-encoding (see CHANGELOG.md "Fixed: Part 1/Part 2
-    pairing, properly this time"): a dead Part 1/Part 2 pairing regex,
-    and a credit-trim step that could strand one half of a pair. A third
-    fix - preferring an exact single-course fit (e.g. a standalone 60cr
-    "Research Report") over a fragmented multi-course selection - is what
-    actually lets this resolve cleanly with no credit overshoot: English
+    just the ANY_OF re-encoding (see CHANGELOG.md): a dead Part 1/Part 2
+    pairing regex, and a credit-trim step that could strand one half of
+    a pair. A third fix - preferring an exact single-course fit (e.g. a
+    standalone 60cr "Research Report") over a fragmented multi-course
+    selection - is what actually lets this resolve cleanly with no
+    credit overshoot: English
     has a same-credit standalone alternative to the thesis pair, so the
     fixed selection logic picks that instead of ever needing one.
 
@@ -2510,36 +2556,32 @@ def test_ma_majors_include_exactly_one_part_two_path(svc):
     assert result.passed, f"{name}: plan fails full validation: {result.errors}"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Geography and Sociology - MA: their Part Two ANY_OF fix is "
-        "correct (verified against real course structure), but with the "
-        "qualification's now-correct 180cr total (was wrongly 240, see "
-        "the (9, 1.5) DegreeProfile fix), their Part One structure - "
-        "several courses stored as flatly required (e.g. Geography: 6 "
-        "courses x 30cr = 180cr, consuming the ENTIRE qualification total "
-        "on Part One alone, leaving 0 for Part Two) - is now visibly "
-        "wrong. Geography's live page describes Part One as 'Coursework "
-        "Pathway (120 credits) or Research Pathway (Between 60 and 90 "
-        "credits)', i.e. a choosable pool correlated with which Part Two "
-        "pathway is taken, not a flat 180cr requirement. This wasn't "
-        "visible against the previous incorrect 240cr total (enough "
-        "slack existed to hide it) - a pre-existing bug, not a "
-        "regression from the length fix. Needs live-verified Part One "
-        "pool structure for each affected major, and the two-pathway "
-        "coupling (Part One choice tied to Part Two choice) is a genuine "
-        "structural gap - the domain model currently has no way to "
-        "express two ANY_OF choices whose branches must match up."
-    ),
-    strict=True,
-)
-def test_geography_and_sociology_ma_part_one_not_yet_fixed(svc):
+def test_geography_and_sociology_ma_part_one_correlated_pathway_fixed(svc):
     """
-    Documents Geography and Sociology - MA specifically, separated out
-    from test_ma_majors_include_exactly_one_part_two_path once English
-    (in that same original group) was confirmed genuinely fixed and
-    these two were found to have a distinct, newly-exposed Part One bug.
-    See the xfail reason above.
+    Geography and Sociology - MA both re-encoded with a correlated Part
+    One/Part Two pathway choice: AnyOf(AllOf(PartOne_A, PartTwo_A),
+    AllOf(PartOne_B, PartTwo_B), ...), live-verified against each
+    subject's own course page rather than guessed.
+
+    Geography: 3-way choice - Coursework (Part One 120cr from a 6-course
+    pool + Part Two 60cr Research Report), Research/90 (Part One 90cr from
+    the same pool + Part Two 90cr thesis), Research/60 (Part One 60cr from
+    the same pool + Part Two 120cr thesis) - all three sum to 180cr.
+
+    Sociology: same 3-way shape, but Part One splits into a compulsory
+    60cr pair (always both courses, all three pathways) plus a variable
+    subject-course component (60cr/30cr/0cr depending on pathway).
+
+    CORRECTS an earlier claim in this test's previous xfail reason and in
+    DATA_QUALITY.md: "the domain model currently has no way to express two
+    ANY_OF choices whose branches must match up" was wrong. AnyOfRequirement
+    nesting AllOfRequirement children already does exactly this - proven
+    here and confirmed by collect_elective_nodes's existing
+    _cheapest_any_of_child logic (coursemap/domain/requirement_utils.py),
+    which recurses into exactly one whole AnyOf branch (not each branch
+    independently), correctly treating a chosen pathway's Part One and
+    Part Two together as one unit. No domain-model or generator code
+    changed to make this work - only the majors.json data was wrong.
     """
     from coursemap.validation.engine import DegreeValidator
 
@@ -2552,88 +2594,122 @@ def test_geography_and_sociology_ma_part_one_not_yet_fixed(svc):
 
 @pytest.mark.xfail(
     reason=(
-        "Education - MA has the same mis-encoded Either/Or Part Two as "
-        "Geography/English/Sociology, but fixing it (ANY_OF re-encoding, "
-        "same as the other three - not yet applied to majors.json for "
-        "this major) surfaces a distinct, newly-found bug: the elective "
-        "top-up pass reaches back into a named pool that's already met "
-        "its own credit target once total elective_budget exceeds the "
-        "sum of all named pool targets, adding a second course from the "
-        "same pool on top of an already-sufficient selection (e.g. both "
-        "the 60cr and 45cr 'Professional Inquiry' variants). The "
-        "subsequent credit trim then removes the original 60cr choice "
-        "and keeps the insufficient 45cr one, purely because of "
-        "(-level, code) removal order - not because it's the better "
-        "choice - leaving the pool short. Needs the top-up pass to skip "
-        "pools already at their own target, not just a trim-order fix. "
-        "Separately, live-verified Education's real Part Two structure "
-        "is a 3-way choice (60cr coursework / 90cr thesis / 120cr "
-        "thesis), not the 2-pool shape stored, and two of its current "
-        "pool codes (267861, 267875) don't belong to this qualification "
-        "at all - they're from a different, similarly-named Master of "
-        "Education qualification. Needs its own majors.json correction, "
-        "not just an ANY_OF wrap of the existing (wrong) pools."
+        "Education - MA's majors.json data is still objectively wrong, "
+        "confirmed by live verification, and remains unfixed: two of its "
+        "current Part Two pool codes (267861, 267875) belong to a "
+        "different, similarly-named Master of Education qualification, "
+        "not this one. Live-verified against the qualification's live page, "
+        "using the same "
+        "correlated-pathway pattern already proven on the other 6 "
+        "majors: the REAL Part Two codes are 267860 (Coursework, 60cr), "
+        "267871/267872 (Thesis 120cr, two parts), 267881/267882 (Thesis "
+        "90cr, two parts) - confirmed to exist in the dataset with "
+        "matching credit values, unlike 267861/267875. Part One is a "
+        "4-course pool (254744/261765/263704/265737, live-verified - "
+        "269733, currently in the stored data, is NOT on this major's "
+        "own live page and is likely the same kind of wrong-code error "
+        "as 267861/267875, not yet separately confirmed). "
+        "STILL NOT FIXED, for a genuine reason found while trying to "
+        "ship it: 267860 has a hard prerequisite (one of five research-"
+        "methods courses, ~15cr) that Massey's own 'Coursework Pathway "
+        "(120 credits)' + '60 credits' = 180cr summary doesn't visibly "
+        "account for - constructing the pathway as literally described "
+        "produces 195cr, not 180cr, in a live end-to-end test. Whether "
+        "that 15cr belongs inside the stated 120cr Part One total (some "
+        "combination not yet worked out, since subject courses are 30cr "
+        "each and don't divide evenly against a 15cr methods course "
+        "plus an integer number of them), or the qualification's real "
+        "total for this specific pathway is 195cr rather than 180cr, or "
+        "something else entirely, isn't resolved - guessing would risk "
+        "the same category of error already made and caught with "
+        "qualifications.json and majors.json elsewhere in this project. "
+        "One genuine, separate, freely-committed fix did come out of "
+        "this investigation: 267860's own prerequisite was mis-scraped "
+        "as AND(267740, 267782, 267783, OR(267741, 267721)) when "
+        "Massey's page says 'one of' all five - fixed via "
+        "_VERIFIED_PREREQ_FIXES regardless of the larger question still "
+        "being open, since it's correct on its own terms."
     ),
     strict=True,
 )
-def test_education_ma_part_two_not_yet_fixed(svc):
+def test_education_ma_still_has_wrong_part_two_course_codes(svc):
     """
-    Documents Education - MA specifically, separated out from
-    test_ma_majors_include_exactly_one_part_two_path once the other
-    three majors in that group were confirmed fixed. See the xfail
-    reason above for the specific new bugs blocking this one.
+    Live-verified: 267861 and 267875 belong to a different Master of
+    Education qualification, not this one, and Education - MA's real
+    Part Two is a 3-way choice (60cr coursework / 90cr thesis / 120cr
+    thesis) - not the 2-pool shape currently stored. This test exists so
+    the moment someone corrects majors.json for this major, it starts
+    failing (unexpectedly passing under strict xfail) and forces that
+    fix to be reflected here too, rather than the data problem quietly
+    persisting once the more visible trim-bug symptom stopped pointing
+    at it.
+    """
+    import json
+    majors = json.load(open(Path(__file__).resolve().parents[1] / "datasets" / "majors.json"))
+    major = next(m for m in majors if m["name"] == "Education – Master of Arts")
+    codes_in_tree = {
+        code
+        for child in major["requirement"]["children"]
+        if child["type"] == "CHOOSE_CREDITS"
+        for code in child["course_codes"]
+    }
+    assert "267861" not in codes_in_tree and "267875" not in codes_in_tree, (
+        "Education – MA no longer contains the known-wrong course codes - "
+        "if this is because majors.json was actually corrected, update "
+        "this test (and DATA_QUALITY.md) to reflect the real fix instead "
+        "of just removing the assertion."
+    )
+
+
+def test_ecology_and_conservation_msc_correlated_pathway_fixed(svc):
+    """
+    Ecology and Conservation - MSc re-encoded the same way as Geography/
+    Sociology - MA: AnyOf(AllOf(PartOne_A, PartTwo_A), AllOf(PartOne_B,
+    PartTwo_B)), live-verified. 2-way choice: 60cr subject courses (both
+    196713 and 232701) + 90cr thesis, or 30cr subject courses (either one)
+    + 120cr thesis - plus a 30cr compulsory research-methods pool common
+    to both pathways. Both sum to 180cr with the compulsory pool.
+
+    Split out from the shared correlated-pathway test once this major was
+    confirmed fixed while Occupational Health and Safety and Māori Health
+    - MHS (below) were not yet - keeping them in one test would have
+    misleadingly implied none of the three were fixed.
     """
     from coursemap.validation.engine import DegreeValidator
 
-    name = "Education – Master of Arts"
-    plan = svc.generate_best_plan(major_name=name)
+    name = "Ecology and Conservation – Master of Science"
+    plan = svc.generate_best_plan(major_name=name, campus="D", mode="DIS")
     tree = svc.degree_tree_for_major(name, campus="D", mode="DIS")
     result = DegreeValidator(tree).validate(plan)
     assert result.passed, f"{name}: plan fails full validation: {result.errors}"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Found while investigating the backlog item to unify this bug with "
-        "Chemistry/Mathematics-MSc's free-electives shortfall (they turned "
-        "out unrelated - see 'Fixed: the Chemistry/Mathematics MSc "
-        "free-electives shortfall' in CHANGELOG.md for that story instead). "
-        "These three were the majors fix_stale_free_elective_pool_sizes "
-        "deliberately left unfixed because the arithmetic went negative - "
-        "live-verifying them (rather than guessing a number) confirms they "
-        "are 3 more instances of the exact same Geography/Sociology-MA "
-        "structural gap, not a new or different bug: a Part One credit "
-        "range correlated with which Part Two pathway is chosen, which the "
-        "domain model has no way to express. Ecology and Conservation - "
-        "MSc: Part One's subject courses are 'Choose between 30 and 60 "
-        "credits from' 196713/232701, Part Two's thesis is 'Choose between "
-        "90 and 120 credits from' four thesis-component courses - two "
-        "correlated pathways (30+150=180 or 60+120... i.e. 30cr subject + "
-        "120cr thesis, or 60cr subject + 90cr thesis, both totalling 180 "
-        "with the 30cr compulsory research-methods course), stored as two "
-        "separate fixed-size ALL_OF requirements instead. Occupational "
-        "Health and Safety / Māori Health - MHS: live-verified to offer "
-        "the same research-vs-professional pathway split with differently "
-        "sized thesis components (e.g. 90cr thesis as 45+45, or a 120cr "
-        "thesis), same underlying shape. No fix attempted here: choosing "
-        "one arbitrary pathway would be an unsafe data edit. The real fix "
-        "(representing two correlated ANY_OF choices) needs the same "
-        "domain-model work Geography's Part One still needs."
-    ),
-    strict=True,
-)
-def test_correlated_part_one_two_majors_not_yet_fixed(svc):
+def test_ohs_and_maori_health_correlated_pathway_fixed(svc):
     """
-    Documents the 3 majors fix_stale_free_elective_pool_sizes deliberately
-    skipped (_UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS in repair_dataset.py)
-    as confirmed instances of the Geography/Sociology-MA correlated
-    Part One/Part Two gap, not a distinct bug needing its own fix. See the
-    xfail reason above.
+    Occupational Health and Safety and Māori Health - MHS re-encoded with
+    the same AnyOf(AllOf, AllOf) correlated-pathway structure proven on
+    Geography/Sociology - MA and Ecology and Conservation - MSc, each
+    live-verified against its own official course page.
+
+    Occupational Health and Safety (2-way): a 30cr compulsory course
+    (251731) common to both pathways, then either 60cr subject courses +
+    90cr thesis, or 30cr subject courses + 120cr thesis.
+
+    Māori Health (3-way): a 30cr compulsory course (150714, live-verified
+    as the qualification's own "Part One Core course" for progression -
+    present in the real requirement but missing from the previously
+    scraped subject-course pool entirely, not just mis-sized), then one of
+    three pathways trading subject-course credit for thesis size: 90cr
+    subject + 60cr Research Report, 60cr subject + 90cr thesis, or 30cr
+    subject + 120cr thesis.
+
+    This closes out 5 of the 6 confirmed correlated-pathway majors
+    (Geography, Sociology, Ecology and Conservation, and these two) -
+    only Earth Science - MSc and TESOL's correlated-pathway half remain.
     """
     from coursemap.validation.engine import DegreeValidator
 
     for name in (
-        "Ecology and Conservation – Master of Science",
         "Occupational Health and Safety – Master of Health Science",
         "Māori Health – Master of Health Science",
     ):
@@ -2643,78 +2719,95 @@ def test_correlated_part_one_two_majors_not_yet_fixed(svc):
         assert result.passed, f"{name}: plan fails full validation: {result.errors}"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Financial Analytics/Research and Financial Technology - Master of "
-        "Finance still have an elective-pool shortfall after the "
-        "qualification-length and free-elective fixes. Confirmed this is a "
-        "distinct generator bug, not a data problem and not the "
-        "level-progression limitation or the Part One/Two correlated-"
-        "pathway gap documented elsewhere: all of this major's pools are "
-        "flat 700/800-level with no level-progression gate, and the 60cr "
-        "pool it fails to fill (11 candidates, all offered D/DIS, no "
-        "prerequisite or restriction issue found) is fully schedulable on "
-        "its own. generate_best_plan's base plan only ever draws from the "
-        "first two of this major's three named pools (135cr from 6 courses "
-        "- more than the 120cr those two pools actually need, since their "
-        "candidate lists overlap and the selection doesn't recognise "
-        "that), then stops; the third pool (125850/125851/125803/125810/"
-        "125811/125820/125821/125892/125895/125897/125898) never gets "
-        "touched, and generate_filled_plan's generic top-up filler (which "
-        "has no concept of a specific unmet named pool, only a total "
-        "credit gap) adds unrelated low-level courses to reach the total "
-        "instead. Risk Analytics - Master of Finance, under the exact same "
-        "qualification with the same pool shape and the same overlapping-"
-        "candidate pattern (just different credit splits: 45/75/60 instead "
-        "of 30/90/60), schedules correctly - so this isn't inherent to the "
-        "shape, something about the specific numbers or candidate ordering "
-        "trips it. A broader scan of all 80 majors with 3+ named elective "
-        "pools found 45 DegreeValidator failures total, but the large "
-        "majority of those are re-manifestations of the already-documented, "
-        "already-xfail'd level-progression limitation (confirmed by "
-        "checking pool levels directly for a sample - Philosophy and "
-        "Sociology - BA both have the tell-tale blocked 45cr L300 pool) or "
-        "the Part One/Two correlated-pathway gap, not this bug. At least "
-        "16 of the 45 are Master's-level majors with no level-progression "
-        "gate at all (including Te Reo, Hauora, Māori Education, and "
-        "Critical Studies in Māori Development - Master of Māori Studies, "
-        "Economics and Social Anthropology - MA, Earth Science and "
-        "Psychology/Health Psychology - MSc, and others), which is the "
-        "real, currently-unscoped size of this specific bug - each would "
-        "need the same individual verification done here for Finance "
-        "before assuming they share this exact cause rather than a fourth, "
-        "still-undiscovered one. Not fixed here: the actual bug lives "
-        "somewhere in search.py's pool-selection order/greedy-selection "
-        "logic (already flagged for its 1960-line size and prior "
-        "elective-selection bugs in this file). It needs a targeted fix, "
-        "not a guess."
-    ),
-    strict=True,
-)
-def test_finance_multi_pool_elective_starvation_not_yet_fixed(svc):
+def test_earth_science_msc_correlated_pathway_fixed(svc):
+    """
+    Earth Science - MSc re-encoded with the same AnyOf(AllOf, AllOf)
+    correlated-pathway structure proven on the other 5 majors, live-
+    verified against its own official course page.
+
+    2-way choice, with a slightly more elaborate Part One than the other
+    5: a 15cr compulsory research-methods pool (119728/119729/162760, one
+    of three restricted-against-each-other options) common to both
+    pathways, then either 45cr subject courses + 120cr thesis, or 60cr
+    subject courses + 15cr additional courses + 90cr thesis - both sum to
+    180cr with the compulsory pool.
+
+    Notable manifestation this major had before the fix: the failure only
+    ever appeared via generate_filled_plan, not generate_best_plan like
+    the other 5 correlated-pathway majors - the base (unfilled) plan
+    happened to pick a self-consistent subset of the old, over-specified
+    5-pool tree that passed validation on its own, while the fill/trim
+    pass produced a real 45cr shortfall in an unrelated pool as a
+    downstream consequence. Worth keeping this test on generate_filled_plan
+    (not switching to generate_best_plan to match the others) so it keeps
+    exercising the same code path the bug was actually found through.
+
+    This closes out all 6 confirmed correlated-pathway majors - only
+    TESOL - Master of Applied Linguistics' correlated-pathway half (still
+    entangled with a separate, unrelated over-specification there) remains.
+    """
+    from coursemap.validation.engine import DegreeValidator
+
+    name = "Earth Science – Master of Science"
+    plan, _filler = svc.generate_filled_plan(name, campus="D", mode="DIS", no_summer=True)
+    tree = svc.degree_tree_for_major(name, campus="D", mode="DIS")
+    result = DegreeValidator(tree).validate(plan)
+    assert result.passed, f"{name}: plan fails full validation: {result.errors}"
+
+
+def test_finance_multi_pool_elective_starvation_fixed(svc):
     """
     Financial Analytics and Research, and Financial Technology - Master of
-    Finance both fail DegreeValidator because generate_best_plan never
-    draws anything from their third named elective pool, even though it's
-    fully schedulable (offered, no prereq/restriction conflict, plenty of
-    candidates). Risk Analytics - Master of Finance, same qualification and
-    pool shape, is included as a passing control to show this isn't
-    inherent to the shape itself. See the xfail reason above for the full
-    investigation.
+    Finance used to fail DegreeValidator: generate_best_plan's base plan
+    only ever drew from the first two of their three named elective
+    pools (135cr from 6 courses, more than the 120cr those two pools
+    actually needed, since their candidate lists overlap and the old
+    selection logic didn't recognise that a course counted toward one
+    pool's target also counted toward the other's). The third pool
+    (125850/125851/125803/125810/125811/125820/125821/125892/125895/
+    125897/125898, 60cr) never got touched.
+
+    Root cause was one level deeper than the selection step: the base
+    plan's degree-total overshoot (from the pool-overlap over-selection
+    above) was correctly detected, but _trim_plan_to_credit_target's
+    excess-removal pass had no per-pool awareness - it would remove
+    whichever pool course sorted first by (-level, code), even if that
+    course was the sole schedulable member covering its OWN pool's
+    entire target. For this major, that meant removing an 800-level 60cr
+    "Research Report" - the only course satisfying the third pool - to
+    fix a mere 15cr degree-total overshoot, zeroing that pool from
+    60/60cr met to 0/60cr, with generic low-level filler silently
+    replacing it afterward instead of the real requirement being met.
+
+    Fixed in _trim_plan_to_credit_target: it now tracks each named pool's
+    currently-scheduled credit total and refuses to remove a course that
+    would drop its own pool below its already-met target, trying the
+    next removable candidate instead (see elective_nodes in that
+    function's docstring). Confirmed via Risk Analytics - Master of
+    Finance as a passing control: same qualification, same three-pool
+    overlapping-candidate shape, just a different credit split (45/75/60
+    instead of 30/90/60) - it already worked before this fix and still
+    does, showing the bug wasn't inherent to the pool shape itself.
+
+    This same fix also resolved 7 other majors previously believed to be
+    blocked by a fundamentally unfixable "45cr level-progression rule"
+    limitation (see DATA_QUALITY.md and CHANGELOG.md) - their real
+    blocker turned out to be this exact trim bug too, not the schema
+    limitation it was attributed to.
     """
     from coursemap.validation.engine import DegreeValidator
 
     # Control: same qualification, same 3-pool overlapping-candidate shape,
-    # different credit split - this one schedules correctly today. If this
-    # assertion ever fails, the bug's shape has changed and the xfail below
-    # needs re-investigating, not just re-running.
+    # different credit split - this one schedules correctly regardless of
+    # the fix. If this assertion ever fails, something else has broken and
+    # needs investigating on its own terms, not as a re-run of this bug.
     control_name = "Risk Analytics – Master of Finance"
     control_plan, _ = svc.generate_filled_plan(control_name, campus="D", mode="DIS", no_summer=True)
     control_tree = svc.degree_tree_for_major(control_name, campus="D", mode="DIS")
     control_result = DegreeValidator(control_tree).validate(control_plan)
     assert control_result.passed, (
         f"{control_name}: expected this control case to still pass; "
-        f"if it doesn't, the bug has changed shape: {control_result.errors}"
+        f"if it doesn't, something unrelated has broken: {control_result.errors}"
     )
 
     for name in (
