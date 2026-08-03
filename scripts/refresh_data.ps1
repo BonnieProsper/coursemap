@@ -55,12 +55,12 @@ if ($DryRun) {
 
 if (-not $PrereqOnly) {
     Write-Host "Step 1/5: Scraping courses from massey.ac.nz (~10-20 min)..." -ForegroundColor Yellow
-    python -m coursemap.ingestion.build_dataset --output datasets/courses.json
+    python -m coursemap.ingestion.build_dataset
     Write-Host "  Done." -ForegroundColor Green
     Write-Host ""
 
     Write-Host "Step 2/5: Scraping major requirement trees (~5-10 min)..." -ForegroundColor Yellow
-    python -m coursemap.ingestion.build_majors_dataset --output datasets/majors.json
+    python -m coursemap.ingestion.build_majors_dataset
     Write-Host "  Done." -ForegroundColor Green
     Write-Host ""
 }

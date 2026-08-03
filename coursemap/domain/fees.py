@@ -12,7 +12,7 @@ IMPORTANT: what these numbers are NOT.
 Massey does not publish a flat per-credit tuition rate anywhere scrapable;
 course pages list prerequisites, restrictions, and assessment breakdowns but
 never a fee figure (the real fee calculator is an interactive tool, not part
-of any static page the scraper can read). Every number below is
+of any static page this project's scraper can read). Every number below is
 therefore a manually-maintained estimate, not data pulled from Massey, and
 it will drift out of date as fees rise each year.
 

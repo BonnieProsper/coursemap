@@ -56,7 +56,7 @@ where = ["."]
 include = ["coursemap*"]
 
 [tool.setuptools.package-data]
-"*" = ["datasets/*.json", "api/*.html"]
+"*" = ["datasets/*.json", "api/*.html", "api/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
