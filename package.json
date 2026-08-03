@@ -1,0 +1,13 @@
+{
+  "name": "coursemap-frontend-tests",
+  "private": true,
+  "type": "module",
+  "description": "Test suite for coursemap/api/static/app.js. Not a build step - app.js ships as-is, served directly by the Python backend. This only runs tests against it.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.0",
+    "vitest": "^2.1.0"
+  }
+}
