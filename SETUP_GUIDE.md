@@ -115,9 +115,9 @@ Or open a CS plan in the browser. The ⚠ dots on L200/L300 cards should mostly 
 
 ---
 
-## Part 3: Add all minors (~15 minutes)
+## Part 3: Scrape real minor data (~15 minutes)
 
-Currently only 8 of Massey's ~41 minors are in the dataset. This step scrapes all of them.
+All 39 of Massey's minors are already in the shipped dataset, but as pattern-inferred data (guessed from `courses.json`, not fetched from each minor's real page). This step replaces that with an actual scrape of every minor's live Massey page - a real upgrade, not just a re-check.
 
 ### Step 3a: Run the minor scraper
 
@@ -128,7 +128,7 @@ python scripts/scrape_minors.py
 Expected output:
 ```
 Loading courses dataset...
-Existing minors: 8
+Existing minors: 39
 Scraping 41 minors from Massey...
 
   Scraping: Accounting...
@@ -182,13 +182,13 @@ Cross-check against the official minor page at massey.ac.nz/study/minors/compute
 python -m uvicorn coursemap.api.server:app --reload --port 8000
 ```
 
-The minor selector in the sidebar should now show all 41 minors.
+The minor selector in the sidebar should now show all 39 minors.
 
 ---
 
 ## Part 4: Refresh offering data (optional, ~2-3 hours)
 
-803 courses have inferred (not scraped) offering data, shown with a `?` badge in the UI. 
+323 courses have inferred (not scraped) offering data, shown with a `?` badge in the UI. 
 To get real 2026 offering data for all of them, re-run the full dataset scraper.
 
 > ⚠️ This takes 2-3 hours and replaces all three dataset files. 
@@ -300,7 +300,7 @@ use different search backends.
 | Priority | Step | Time | Impact |
 |---|---|---|---|
 | 🔴 Critical | Part 2: Run prereq scraper | 30 mins | Fixes the remaining prereq gap, biggest improvement possible |
-| 🟡 High | Part 3: Scrape all minors | 15 mins | 8 → 41 minors |
+| ⚪ Low | Part 3: Scrape real minor data | 15 mins | Replaces pattern-inferred minors with real scraped data |
 | 🟢 Medium | Part 6: Deploy to Railway | 30 mins | Other students can use it |
-| ⚪ Low | Part 4: Full data refresh | 3 hours | Removes 803 `?` offering badges |
+| ⚪ Low | Part 4: Full data refresh | 3 hours | Removes 323 `?` offering badges |
 | ⚪ Future | Part 7: Add another uni | weeks | Major scope expansion |

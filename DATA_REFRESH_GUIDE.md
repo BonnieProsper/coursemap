@@ -17,14 +17,14 @@ The deployment sandbox **cannot reach massey.ac.nz** (network policy). Data refr
 | S1 | Feb | Jan 25 |
 | S2 | Jul | Jun 25 |
 
-The GitHub Actions workflow (`data-refresh.yml`) creates a PR automatically on Feb 1 and Jul 1, but **someone must run it locally** since the CI runner also can't reach Massey.
+There's no automated PR or CI step for this yet - `scripts/refresh_data.sh` has to be run locally by a developer with internet access, on each of these dates, and the result committed manually.
 
 ## How to refresh
 
 ```bash
 # Clone and install
 git clone <repo>
-cd coursemap_project
+cd coursemap
 pip install -e ".[dev]"
 
 # Full refresh (30–45 min, needs internet)

@@ -104,7 +104,16 @@ Or just restart: `python -m uvicorn coursemap.api.server:app --reload --port 800
 python -m pytest tests/ -q
 ```
 
-**677 passed, 1 skipped, 9 xfailed.** The xfailed tests are documented, known limitations (see DATA_QUALITY.md), not silent skips.
+**858 passed, 2 skipped, 4 xfailed** (4 known, documented failures - see DATA_QUALITY.md). The xfailed tests are documented, known limitations, not silent skips.
+
+The frontend (`coursemap/api/static/app.js`) has its own test suite, separate from pytest:
+
+```powershell
+npm install
+npm test
+```
+
+Covers the functions that are cleanly testable in isolation (URL state parsing, saved-plan storage, minor-code extraction). Most of `app.js` is DOM-coupled UI logic that isn't unit-tested yet - see `tests_js/loadApp.js` for how the harness loads the real shipped file into jsdom.
 
 ---
 
@@ -113,9 +122,12 @@ python -m pytest tests/ -q
 ```
 coursemap/
   api/
-    server.py           API routes (FastAPI), 1,839 lines
+    server.py           API routes (FastAPI), 1,997 lines
     plan_store.py       SQLite plan cache with async wrappers
-    ui.html             Single-file frontend (vanilla JS)
+    ui.html             Page shell (markup only), 450 lines
+    static/
+      app.css           1,053 lines
+      app.js             2,347 lines, vanilla JS, no build step
   domain/
     course.py           Course, Offering (with full_year flag)
     plan.py             DegreePlan, SemesterPlan
@@ -129,7 +141,7 @@ coursemap/
   rules/
     degree_rules.py     Derives requirement tree from qual + major data
   services/
-    planner_service.py  Main orchestration (1,685 lines, large, but the
+    planner_service.py  Main orchestration (1,962 lines, large, but the
                          elective-filler duplication that was the real
                          refactor target is fixed, see CHANGELOG v2.3.0)
     degree_info_service.py     Read-only degree metadata queries
@@ -138,6 +150,9 @@ coursemap/
     engine.py           Requirement tree satisfaction checker
   optimisation/
     search.py           Branch-and-bound plan optimiser
+tests_js/
+  loadApp.js             jsdom loader for app.js
+  *.test.js               vitest test files
 datasets/
   courses.json          2,766 courses with offerings, credits, prereqs
   majors.json           380 majors with requirement trees

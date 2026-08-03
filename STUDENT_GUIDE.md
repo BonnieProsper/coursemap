@@ -121,4 +121,4 @@ Minor support is approximate. The planner adds minor courses to your preferred e
 3. ☐ Confirm course availability for your specific enrolment year
 4. ☐ If adding a minor, verify minor requirements separately
 5. ☐ Check actual fees at [massey.ac.nz/fees](https://www.massey.ac.nz/fees)
-6. ☐ Book an appointment with your [academic advisor](https://www.massey.ac.nz/student-life/student-services/student-advisory-services/)
+6. ☐ Book a session with your [academic advisor](https://www.massey.ac.nz/student-life/student-services/student-advisory-services/)

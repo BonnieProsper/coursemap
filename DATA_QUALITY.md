@@ -1,406 +1,237 @@
-# Data Quality & Improvement Guide
+# Data Quality
 
-This document explains what data the planner uses, where it comes from, its known gaps, and how to improve it.
-
----
-
-## Dataset Overview
-
-| File | Records | Source | Last updated |
-|---|---|---|---|
-| `datasets/courses.json` | 2,766 courses | Massey Swiftype API + page scraping | Scraped 2026 |
-| `datasets/majors.json` | 380 majors | Massey Swiftype API + requirement pages | Scraped 2026 |
-| `datasets/qualifications.json` | 176 qualifications | Massey Swiftype API | Scraped 2026 |
-| `datasets/minors.json` | 39 minors | Hand-curated from the Massey handbook | Hand-curated |
-
-All course `description` fields are auto-generated boilerplate (level/credits/campus summary), not the real Massey course description. Click the ↗ link on any course to see the actual page.
+What the planner's data covers, what's confirmed correct, what's confirmed wrong, and what's unverified. If you're deciding whether to trust a plan this tool generates, read this first.
 
 ---
 
-## Highest-priority open item: master's credit totals and pathway choice
+## Dataset overview
 
-`qualifications.json`'s `length` field comes from Massey's Swiftype `qual_length` value. It is a broad duration bucket, not a reliable credit total. `DegreeProfile` currently derives `total_credits = length * 120`, so any qualification whose real total is not a whole number of years will be wrong unless it has an explicit correction.
-
-The Level-9 `length=2` qualifications have all been checked against the official Massey regulations pages, which state credit totals directly. Results:
-
-- 32 of 41 were stored as 240cr but are actually 180cr or 120cr. These are listed in `_VERIFIED_QUALIFICATION_LENGTH_FIXES` with source citations.
-- 9 of 41 were confirmed correct at 240cr and need no override: PMAPC, PMCLR, PMSCW, PMCLP, PMMRV, PMRSE, PMNRS, PMPBH, PMPRA, PMBSA, and PMEDV.
-- All 32 corrections are now written to `datasets/qualifications.json`, not just represented in the repair table. This was verified by loading the shipped dataset from disk and checking each corrected code directly.
-
-The earlier version of this document overstated the state of the shipped data. Thirty corrections existed in `_VERIFIED_QUALIFICATION_LENGTH_FIXES`, but the repaired output had not been persisted to `datasets/qualifications.json`; only PMART and PMSCN had actually landed in the dataset. That is now fixed. Future data-correction tables should be checked against the persisted JSON, not only against the repair function.
-
-There is still a larger modelling gap. Massey master's qualifications can be 120, 180, or 240 credits depending on prior study and admission pathway. The planner has no pathway-choice input, so it can only model one default total per qualification. The stored-number corrections fix the common case, but they do not let a student choose the alternate pathway where Massey offers one.
-
-The remaining six Level-9 qualifications already reported `length=1` and were not part of the `length=2` sweep. They are plausible, but still unverified. A durable fix would derive degree totals from the qualification requirement tree and add an explicit pathway question where the regulations support multiple totals.
-
-## Master of Arts Part One: a second bug the length fix exposed, not caused
-
-Correcting Master of Arts's total to the real 180cr immediately exposed that **Geography** and **Sociology - MA** have a broken Part One: several courses stored as flatly required (`type: COURSE`, not a choosable pool), consuming credits the real qualification treats as smaller and flexible. Geography's Part One alone is 6 courses x 30cr = 180cr - the *entire* qualification total - leaving literally nothing for Part Two, which structurally cannot be right for a qualification that has a documented Part Two at all.
-
-Geography's live page describes Part One as "Coursework Pathway (120 credits) or Research Pathway (Between 60 and 90 credits)" - i.e. Part One's own credit total depends on which Part Two pathway is taken, not a fixed number. This is a real structural gap: the domain model (`AnyOfRequirement`, `ChooseCreditsRequirement`) has no way to express two correlated choices where picking a Part Two branch also determines the valid Part One range. Modelling this properly (rather than picking one arbitrary Part One pool size) needs its own design work, not a quick data patch.
-
-**English - MA was already correctly modelled** (Part One as two genuine `CHOOSE_CREDITS` pools, not flat requirements) - unaffected by this bug, still passes validation for real after the length fix. `test_geography_and_sociology_ma_part_one_not_yet_fixed` (`xfail(strict=True)`) documents the other two.
-
-**Chemistry and Mathematics - MSc surfaced a related, but distinct finding: the CLI's "satisfied" message didn't mean what it looked like it meant.** Both now correctly target 180cr. `svc.generate_filled_plan` produces a plan (e.g. Chemistry: `123899` Thesis 120cr + `123711`/`123713` Research Methods/Advanced Chemical Synthesis 30cr each = 180cr) that used to be reported as `Major requirements: satisfied` with total credits matching the target exactly - looked complete. Running the *same* plan through `DegreeValidator` directly (not the CLI's own gap arithmetic) failed it: `"Free electives: have 0cr, need 60cr from any course not already counted elsewhere."` Same plan, two different verdicts.
-
-Root cause was that neither `cli/main.py`'s summary nor `api/server.py`'s `_build_gap_meta` ever re-ran the real `DegreeValidator` against the generated plan - both computed their own simplified `degree_total - total_credits` arithmetic and called it "satisfied" whenever that reached zero, never checking whether the *specific named pools* the requirement tree actually describes were met. **Fixed** - both now run the real validator and surface its errors: the CLI prints `Major requirements: NOT fully satisfied` plus each specific error instead of a blanket "satisfied"; the API's response includes a `structural_errors` list and matching `⚠ Degree requirement not met` warnings. Best-effort in both (a lookup failure is swallowed, never blocks a plan that already generated fine) and not yet wired up for double majors (no combined-tree validator exists - documented, not silently skipped). See CHANGELOG.md.
-
-**Chemistry/Mathematics - MSc's underlying "free electives" shortfall is now genuinely fixed, not just surfaced.** Every major tree ending in a trailing, unconstrained `CHOOSE_CREDITS` node (`course_codes: []`, the generic free-electives placeholder) had that node's size baked in as `(240 - everything else explicitly modelled)`. That used the stale 240cr qualification total, not the corrected 180cr total. A scan found 51 majors under length-fixed qualifications with exactly one such open node, and every one summed to 240cr before repair.
-
-This is a mechanical correction, not a new claim about curriculum content: the open node's whole job is "whatever's left over to reach the total", and the total itself was already independently live-verified via `_VERIFIED_QUALIFICATION_LENGTH_FIXES` - correcting the placeholder to be internally consistent with that already-verified total doesn't require checking a live page again, unlike every other correction in this document. **Fixed for 48 of the 51** via `fix_stale_free_elective_pool_sizes` in `repair_dataset.py`, wired into the repair pipeline as Pass 5 and baked into the shipped `datasets/majors.json`. Verified genuinely end-to-end, not just arithmetically: Chemistry and Mathematics - MSc (M/INT) now both produce a plan that passes the real `DegreeValidator` with zero errors, and five more spot-checked majors across four different qualifications (Statistics - MSc, History - MA, Management - MMgt, Business - Master of Analytics) do too.
-
-**3 majors were deliberately left untouched, not force-fixed.** Ecology and Conservation - MSc, Occupational Health and Safety - MHS, and Māori Health - MHS hit the same stale-240 arithmetic, but their corrected open-pool size would be negative: their explicitly modelled non-open pools already sum to 210cr against a real 180cr total. Live checks showed the same structural issue as Geography/Sociology - MA: Part One and Part Two are correlated pathway choices, but the dataset stores them as independent fixed-size requirements. `_UNRESOLVED_NEGATIVE_ELECTIVE_POOL_MAJORS` names all three, and `test_correlated_part_one_two_majors_not_yet_fixed` records the verified details. No data patch is safe until the model can represent the correlated choice.
-
-**Financial Analytics and Research - Master of Finance still exposes a separate generator bug.** The qualification total and free-elective gap are now correct, but `DegreeValidator` still reports `"Elective pool: have 0cr, need 60cr from 11 available courses"`. The third named elective pool is modelled correctly, but `generate_best_plan` never draws from it. Risk Analytics - Master of Finance uses the same three-overlapping-pool shape with different credit targets and schedules correctly, so this is not an inherent data-shape failure.
-
-A broader scan of all 80 majors with three or more named elective pools found 45 `DegreeValidator` failures. Most were already-known level-progression or Part One/Two pathway issues. At least 16 are master's-level majors with no level-progression gate, so the named-pool starvation bug is likely broader than Finance. Each candidate still needs its own verification before assuming the same cause.
-
-**Not yet checked:** whether Education and the other ~39 unverified Either/Or majors have the same Part One problem. Worth checking as part of, not separate from, verifying each one's Part Two.
-
----
-
-## Prerequisite Coverage
-
-| Status | Count (L200-400, undergrad) | Count (L200+, all levels incl. postgrad) |
+| File | Records | Source |
 |---|---|---|
-| Has prerequisite data recorded | 770 (66.3%) | 867 (36.4%) |
+| `datasets/courses.json` | 2,766 courses | Massey Swiftype API + page scraping |
+| `datasets/majors.json` | 380 majors | Massey Swiftype API + requirement pages |
+| `datasets/qualifications.json` | 176 qualifications | Massey Swiftype API |
+| `datasets/minors.json` | 39 minors | Pattern-inferred from `courses.json` (not yet scraped from live pages) |
+
+Course `description` fields are auto-generated boilerplate (level/credits/campus summary), not Massey's real course description. The ↗ link on any course card goes to the real page.
+
+---
+
+## Qualification credit totals
+
+`qualifications.json`'s `length` field comes from Massey's `qual_length` field - a coarse duration category, not a precise credit total. `DegreeProfile` (`rules/degree_rules.py`) derives `total_credits = length * 120`, which is wrong for any qualification whose real total isn't a whole number of years.
+
+All 41 Level-9, `length=2` qualifications have been checked against their own official regulations page. **32 of 41 (78%) were wrong** and are now corrected via a cited override table (`_VERIFIED_QUALIFICATION_LENGTH_FIXES` in `repair_dataset.py`), baked into the shipped dataset and covered by tests. 9 are confirmed correct at 240cr. The remaining 6 Level-9 qualifications (already `length=1`) are unverified but plausible.
+
+**Open, architectural gap:** several qualifications' real credit total depends on the individual student's prior study (e.g. entering with vs without Honours) - Massey states this explicitly for master's degrees generally, and MSc has a documented 180cr/240cr split. `DegreeProfile` has no concept of this on its own, and the planner has no way to *detect* which pathway applies to a given student. A manual `credits_override` parameter (`/api/plan`, `--credits-override`, and a `GET /api/majors/pathway-notice` endpoint that surfaces the ambiguity) lets a student who knows their own total plan against it correctly - but this only covers qualifications named in `_QUALIFICATIONS_WITH_ALTERNATE_TOTALS` (currently just MSc), and it's still on the student to know and enter the right number. A general solution needs a real prior-study input the planner can reason about on its own, not another data fix.
+
+Free-elective pool sizes in `majors.json` are derived from each qualification's total at build time. When 48 of the 51 affected majors had a stale, pre-fix total baked in as an absolute number, those pool sizes were wrong too - fixed as part of the same pass (`fix_stale_free_elective_pool_sizes`, Pass 5 of the repair pipeline). 3 majors (Ecology and Conservation – MSc, Occupational Health and Safety – MHS, Māori Health – MHS) needed the correlated-pathway fix below instead of the automatic correction, since their non-open pools already exceeded the corrected total on their own.
+
+---
+
+## Correlated-pathway majors (Part One / Part Two choice)
+
+Several majors offer a genuine choice of pathway (e.g. coursework vs research, or thesis size), where Part One's credit split depends on which Part Two option is taken. The schema already supports this correctly - `ANY_OF` nodes whose children are themselves `ALL_OF` nodes express a correlated choice with no code changes, and `collect_elective_nodes` already resolves exactly one branch as a unit. The gap was in the data, not the engine.
+
+**Fixed, live-verified, and tested** (6 of 7 known instances):
+- **Geography** - 3-way: Coursework (Part One 120cr + Part Two 60cr Research Report), Research/90 (90cr + 90cr thesis), Research/60 (60cr + 120cr thesis), all drawing Part One from a shared 6-course pool.
+- **Sociology** - same 3-way shape; Part One has a 60cr compulsory pair common to all three plus a variable subject component.
+- **Ecology and Conservation – MSc** - 2-way: 60cr subject + 90cr thesis, or 30cr subject + 120cr thesis, plus a 30cr compulsory research-methods pool common to both.
+- **Occupational Health and Safety – MHS** - same 2-way shape, plus one compulsory course (`251731`).
+- **Māori Health – MHS** - 3-way (90/60/30cr subject against 60/90/120cr thesis), plus one compulsory course (`150714`), which was missing from the previously scraped data entirely, not just mis-sized.
+- **Earth Science – MSc** - 2-way, with a 15cr compulsory research-methods pool (one of three mutually-restricted options) common to both pathways.
+
+English – MA was already correctly modelled (two genuine `CHOOSE_CREDITS` pools) and needed no change.
+
+**Open:** TESOL – Master of Applied Linguistics has the same correlated-pathway duplication (two pools sharing an identical candidate list) plus a separate over-specification that persists even once the duplication is resolved. Needs the same live-verify-and-re-encode treatment as above for the pathway half, and the re-scraping work described below for the over-specification half.
+
+**Unverified:** whether Education and roughly 39 other majors sharing the same Master of Arts `(60cr, 120cr)` shape have the same Part One problem. `scripts/audit_pool_overlap.py` finds candidates dataset-wide - do not bulk-apply a fix from its output alone, since a legitimately-both-required shared pool looks identical to a mis-encoded either/or from the data alone; each candidate needs its own live-page check.
+
+**Education – MA specifically:** live-verified Part Two codes are `267860` (Coursework, 60cr), `267871`/`267872` (Thesis 120cr), `267881`/`267882` (Thesis 90cr) - the previously stored `267861`/`267875` belong to a different qualification (PMEDC, Master of Education) and are wrong. Constructing the coursework pathway as Massey's own page describes it (120cr Part One + 60cr Part Two = 180cr) produces 195cr in practice, because `267860` has its own ~15cr prerequisite that the page's summary doesn't visibly account for. Not shipped - the discrepancy is unresolved and guessing at it risks repeating the same category of error already found and corrected elsewhere in this dataset. `test_education_ma_still_has_wrong_part_two_course_codes` pins the current state as `xfail(strict=True)`.
+
+---
+
+## Over-specified majors
+
+**~36 majors (9.5%)** have scraped data listing more required-looking courses (or required courses + every pool's own stated minimum) than the qualification's credit target allows for - e.g. a 120cr diploma whose data lists 165cr of compulsory-looking codes. Concentrated in postgraduate Psychology, Education, and Māori Studies. Root cause: source data flattening several alternative specialisation tracks into one list, not the degree genuinely requiring more credits than it awards.
+
+The planner will cap the *droppable* portion of a required-course list to fit the credit budget, but never drops a course its own validation tree checks as required - even if that produces a plan over the credit target. An over-target plan is a visible failure; a plan silently missing a required course is not, so the tool is deliberately biased toward the former. For majors in this category, the only real fix is re-scraping the requirement page and modelling the alternative tracks as genuine choice structures - not a scheduler change.
+
+Known specific instances: Human Resource Management – MBS, Economics – MA (required courses + pool minimums together exceed the total, even though no single list does on its own).
+
+---
+
+## Prerequisite coverage
+
+| Status | L200–400, undergrad | L200+, all levels |
+|---|---|---|
+| Prerequisite data recorded | 770 (66.3%) | 867 (36.4%) |
 | No prerequisite data recorded | 391 (33.7%) | 1,512 (63.6%) |
 
-The undergrad-only figure is probably the more useful one for most students. A third of L200-400 courses are missing prerequisite data. The all-levels figure is much higher because many postgrad papers (especially research/thesis courses) genuinely have no prerequisite beyond admission to the programme; that's not all scraping failure, but it hasn't been separated out from genuine gaps, so the UI indicator (below) flags both the same way.
+"No prerequisite data recorded" means the scraper found nothing for that course - it does not mean the course has no prerequisite. Treat it as unverified. Many postgrad/thesis courses genuinely have no prerequisite beyond programme admission; that's not separated out from genuine gaps, so the UI flags both the same way.
 
-"No prerequisite data recorded" means the scraper didn't capture anything for that course. It does NOT mean the course has no prerequisite. Treat it as "unverified," not "confirmed none."
+**UI indicator** - a dot next to each course code: green (recorded, satisfied by this point in the plan), amber (recorded, not yet satisfied), blue (no data recorded, unverified), no dot (L100, or confirmed to genuinely have none). The course drawer's Prerequisites section links to the real Massey page for anything unverified.
 
-**UI indicator:** course cards show a small dot next to the course code:
-- 🟢 green: prerequisites recorded and satisfied by courses earlier in the plan
-- 🟠 amber: prerequisites recorded but NOT yet satisfied by this point in the plan
-- 🔵 blue: no prerequisite data recorded for this L200+ course (unverified, not confirmed-none)
-- *(no dot)*: L100 course, or a course confirmed to genuinely have no prerequisite
+**Known specific corrections**, live-verified and applied via `_VERIFIED_PREREQ_FIXES` in `repair_dataset.py` (source-cited there, regression-tested):
 
-The course drawer shows the same distinction in the Prerequisites section, with a direct link to the course's real Massey page when data is unverified.
+- `159251` - no prerequisite recorded; actually requires `159234`
+- `159302` - recorded as `159234` AND `159201`; actually `159201` OR `159234`
+- `159356` - missing `159352`
+- `159342` - recorded as AND; actually OR (`159201` or `159234`)
+- `159352` - wrong courses entirely; actually (`159100` or `159101`) and `158258`
+- `159361` - missing `159235`
+- `159336` - recorded as AND; actually OR (`159234` or `159235`)
+- `158222` - wrong courses entirely; approximated as (`159100` or `159101`) and one of `160101`/`160102`/`161111`/`161122` (real requirement references a "1611xx" prefix pattern the schema can't express - see limitation below)
+- `159333` - real requirement is "three of 1592xx, 1582xx or 2972xx" (choose-3-of-pool); approximated as requiring `159201` alone
+- `161222` - no prerequisite recorded; real requirement "1611xx", approximated as OR of `161101`/`161111`/`161122`/`161140`
+- `161250` - recorded as requiring `161111` specifically; real requirement "1611xx or 297101"
+- `161251` - same issue as `161250`, same fix
+- `161380` - no prerequisite recorded; real requirement "two 1613xx courses" (choose-2), approximated as `161304` alone. Graduate-Diploma-only, no current DIS offering, so the approximation has no practical effect today.
+- `160212` - recorded as a flat AND of all 10 codes across both clauses; real requirement is two independent choose-one clauses. This was the direct cause of Mathematics – BSc appearing self-contradictory.
+- `123201` - same flat-AND pattern; real requirement "one of (123102, 123105, 124104, 123172) and one of (160101, 160102, 160105, 160132, 160133)". Was the direct cause of Chemistry – BSc failing to generate.
+- `117226`, `286321` - real requirement "one of 117152, 117153, 117155 or 194101"
+- `117243` - real requirement "one of 117153, 117155 or 194101"
+- `120303` - real requirement "one of (120201, 120218, 120219, 196205, 196207, 203210)"
+- `117201`, `117202` - same flat-AND-of-a-choice pattern
+- `123305` - nested case: "one of these 6 sciences and one of these 4 sustainability courses", was stored as all 10 required
+- `289250`, `289350` - same pattern
+- `241304`, `241305` - checked and confirmed **not** the AND/OR bug: both pages genuinely say "241301 and 241302 or appraisal required," a real AND plus an alternative the schema can't express. Left unchanged.
 
-**Known specific errors found and fixed during a manual audit** (cross-checked against Massey's live qualification regulations pages). If you find more, the pattern to check is AND vs OR confusion and missing prerequisite chains, not just missing data:
-- 159251 (Software Engineering Design and Construction): was recorded with no prerequisite; actually requires 159234
-- 159302 (Artificial Intelligence): was recorded as 159234 AND 159201; actually 159201 OR 159234
-- 159356 (Software Engineering Capstone): was missing 159352 from its prerequisite
-- 159342 (Operating Systems and Networks): was AND, actually OR (159201 or 159234)
-- 159352 (Advanced Web Development): had the wrong courses entirely; actually (159100 or 159101) and 158258
-- 159361 (Advanced Games Programming): was missing 159235
-- 159336 (Mobile Application Development): was AND, actually OR (159234 or 159235)
-- 158222 (Data Wrangling and Machine Learning): had the wrong courses entirely; approximated as (159100 or 159101) and (one of 160101/160102/161111/161122). Massey's actual regulation references a "1611xx" prefix pattern that isn't expressible in the current schema, see the note on choose-N/prefix-pattern prerequisites below
-- 159333 (Programming Project): real requirement is "three of 1592xx, 1582xx or 2972xx" (a choose-3-from-pool requirement, not "two of 158222, 1592xx" as a previous version of this note stated. That was itself a transcription error, caught during a later audit pass) and approximated as requiring 159201 alone, since this schema has no construct for "N of M courses" as a prerequisite. This is a known approximation, not a verified match, and is now an under-approximation in two ways (wrong N, and not the full pool) rather than one.
-- 161222 (Design and Analysis of Experiments): was recorded with no prerequisite at all; real requirement is "1611xx". Approximated as an OR of 161101/161111/161122/161140, the 1611xx courses that currently exist in the dataset. A clean fix list for one subject (Computer Science) doesn't mean other subjects (here, Statistics) are clean too.
-- 161250 (Data Analysis): was recorded as requiring 161111 specifically, too narrow; real requirement is "1611xx or 297101". Approximated the same way as 161222, plus 297101.
-- 161251 (Regression Modelling): same issue and same fix as 161250. Real requirement is also "1611xx or 297101".
-- 161380 (Statistical Analysis Project): was recorded with no prerequisite; real requirement is "Two 1613xx courses" (a choose-2-from-pool requirement), approximated as requiring 161304 alone (the same single-course-stand-in approach as 159333 above). This course is Graduate-Diploma-only with no current DIS offerings, so the approximation has no practical effect on undergraduate plan generation; included for data correctness, not because any current plan depends on it.
-- 160212 (Discrete Mathematics): was recorded as a flat AND of every code in both prerequisite clauses (effectively requiring all ten first-year courses at once); real requirement, live-verified, is "one of (160101, 160102, 160103, 160105, 160111, 160112, 160132, 160133, 228171 or 228172) and one of (159101, 159171 or 230112)" - two independent choose-one clauses. This was the cause of Mathematics, Bachelor of Science appearing self-contradictory (see below): it directly requires both 160101 and 160102, and the mis-scraped AND then also forced in 160105 via 160212, which mutually restricts both. Fixed by this correction alone; no scheduler change needed.
-- 123201 (Chemical Energetics): was recorded the same way as 160212 above - a flat AND of every code in both clauses, requiring 160101 AND 160102 AND 160105 simultaneously (self-contradictory, since 160105 restricts both). Real, live-verified: "one of (123102, 123105, 124104 or 123172) and one of (160101, 160102, 160105, 160132 or 160133)". This is stale data, not a current parser gap - `parse_prerequisite_text()` already returns the correct tree for this exact phrasing, confirmed by testing it directly. Fixed by this correction; this was the actual cause of Chemistry, Bachelor of Science failing to generate.
-- 117226, 117243, 286321: same flat-AND-of-a-"one of"-list pattern, all live-verified against their own pages. 117226 and 286321 both real-require "one of 117152, 117153, 117155 or 194101"; 117243 real-requires "one of 117153, 117155 or 194101" (the same list without 117152, which 117243 doesn't offer as an alternative).
-- 120303 (Plant Diversity): same pattern; real requirement is "one of (120201, 120218, 120219, 196205, 196207 or 203210)", a 6-code parenthesized "one of" list, not the flat AND that was stored.
-- 241304 (Contrastive Study of Chinese and English) and 241305 (Translation from and into Chinese) were flagged by the contradiction audit but are **not** the AND/OR bug: both pages genuinely say "241301 and 241302 or appraisal required" - a real AND of the two courses, plus an "or appraisal" alternative the schema can't express (same limitation as choose-N-of-M). The stored `AND(241301, 241302)` is correct as far as the schema can represent it. If there's a real issue here, it's in `241301`/`241302`'s own restriction data (unverified - would need those two courses' own pages, not these two's), not in what's stored for 241304/241305. Left unchanged.
+**Schema limitation:** the prerequisite tree only supports AND/OR over fixed course codes. It cannot express "choose N of M" or prefix-pattern alternatives (e.g. "any 1611xx course"). Courses with this kind of requirement are approximated by expanding to the known matching codes. Restrictions/corequisites are flat code lists with the same limitation one level simpler - "one of X, Y, Z" collapses to `[X, Y, Z]` with the choice meaning lost.
 
-These four Statistics fixes are implemented in `coursemap/ingestion/repair_dataset.py`'s `apply_verified_prereq_fixes` / `_VERIFIED_PREREQ_FIXES` (with full source citations in that module), run as part of the normal repair pipeline (`python -m coursemap.ingestion.repair_dataset`), rather than as one-off manual edits to courses.json, so they're reproducible if the dataset is ever re-scraped from scratch, and have dedicated regression tests in `tests/test_repair_dataset.py`.
+**A stored fix does not survive re-scraping on its own** unless the live parser now also handles that page's phrasing (in which case reapplying the override is a harmless no-op). Four entries (`161222`, `161250`, `161251`, `161380`) are a genuine exception: the live page has no literal course-code list for these ("1611xx", "two 1613xx courses"), so a fresh scrape will always return fewer codes than the deliberately-expanded override. These four trip the regression guard (`_is_suspicious_regression`) and are correctly skipped on every re-scrape, by design - they need to stay as permanent manual entries until the schema supports choose-N-of-M.
 
-### How to fix prerequisite, restriction, and corequisite data (requires Windows/Mac with internet access)
+### Refreshing prerequisite, restriction, and corequisite data (requires network access to massey.ac.nz)
 
-**Step 1: Test connectivity:**
 ```bash
+# Step 1 - connectivity check
 python scripts/test_prereq_scraper.py
-```
-Expected output: 5 courses scraped, showing prerequisites, restrictions, and corequisites for each (most will show `restrictions: []` and `corequisites: []`, since most courses genuinely have neither; 159201 in the test set has a known real restriction, so its line should show `restrictions: ['159271']`. If it shows `[]` instead, don't trust a full run yet, see the warning the script itself prints).
 
-**Step 2: Run the full refresh (~2-3 hours for all 2,766 courses):**
-```bash
+# Step 2 - full refresh, ~2-3 hours for all 2,766 courses
 python -m coursemap.ingestion.refresh_prerequisites
-```
-This fetches each course's Massey page once, and from that single fetch parses real AND/OR prerequisite logic plus flat restriction and corequisite code lists, then updates `courses.json` with all three.
 
-**Options:**
-```bash
-# Only re-scrape courses with no prerequisite data (faster):
+# Only re-scrape courses with no prerequisite data (does not cover restrictions/corequisites,
+# since an empty list there is indistinguishable from "genuinely has none" once scraped)
 python -m coursemap.ingestion.refresh_prerequisites --only-missing
 
-# Test with first 50 courses:
+# Test with a subset
 python -m coursemap.ingestion.refresh_prerequisites --limit 50
 
-# Reduce concurrency if getting rate-limited:
+# Reduce concurrency if rate-limited
 python -m coursemap.ingestion.refresh_prerequisites --concurrency 5
 ```
-Note `--only-missing` is keyed on prerequisites only (skips a course if its prerequisites are already a structured dict/str). It does not have an equivalent signal for restrictions/corequisites, since an empty list is indistinguishable from "genuinely has none" once a course has been scraped once. The first full run after upgrading to this version should be a plain run without `--only-missing`, so every course's restrictions/corequisites get scraped at least once.
-
-**Known schema limitation:** the prerequisite expression tree only supports AND/OR over fixed course codes. It cannot express "choose N of M courses" (e.g. 159333's "two of 158222, 1592xx") or prefix-pattern alternatives (e.g. "any 1611xx-coded course"). Courses with this kind of requirement are necessarily approximated. If you're extending this dataset, search for other courses with similarly-phrased regulations before assuming a simple AND/OR captures them correctly. Restrictions and corequisites have the same limitation one level simpler: they're stored as flat code lists with no choose-N structure at all, so "Corequisites: one of X, Y, Z" collapses to a flat `[X, Y, Z]` with the choose-one meaning lost.
-
-**A courses.json fix does not survive the next re-scrape on its own.** A `_VERIFIED_PREREQ_FIXES` entry corrects the *stored* data; a fresh scrape independently re-parses each course's live page from scratch and overwrites it. If the live parser now handles that page's phrasing correctly (e.g. the 160212/123201 cases in this file's corrections list), the re-scrape reproduces the fix on its own and the registry entry becomes redundant (harmless - reapplying an already-correct value is a no-op). But the four "choose N of M"/prefix-pattern approximations above (`161222`, `161250`, `161251`, `161380`) are a different case: the *live page* genuinely just says "1611xx" or "two 1613xx courses" - there's no literal course-code list on the page for the scraper to find, so a fresh scrape of these four will always return fewer codes than the deliberately-expanded approximation already stored. Confirmed on a real run: all four tripped the regression guard (`_is_suspicious_regression`), retried 3 times, and were correctly left untouched rather than overwritten with the literal (worse) parse. This is the regression guard doing exactly its job, but it also means these four specific courses will show as "suspicious" and get skipped on every future re-scrape, forever, by design - re-running the refresh again won't ever pick them up on its own. They need to stay as manual entries in `_VERIFIED_PREREQ_FIXES` (they already are) until the schema itself supports "choose N of M"; unlike the other entries in that registry, don't expect a re-scrape to make these four redundant.
 
 ---
 
-## Restrictions and Corequisites
+## Restrictions and corequisites
 
-As of the version that first found this, `restrictions` and `corequisites` were `[]` for all 2,766 courses in `courses.json`. This is not a reflection of most courses genuinely having neither; Massey's course pages commonly list both (e.g. `159201 R 159271`, `125803 C 125702`). It's because nothing in the ingestion pipeline ever looked for these sections: `fetch_courses.py` hardcodes them empty at discovery time, and `prerequisite_scraper.py` (before that version) only ever searched for a "Prerequisite(s)" section.
+Both fields are populated as of the current dataset (restrictions 75.6% empty, corequisites 93.6% empty - expected, since most courses genuinely have neither). `coursemap/planner/generator.py`'s restriction check was always correct but was silently unreachable for every plan ever generated until this data existed.
 
-**The first scraper fix was itself wrong, caught before it could write bad data.** `find_restriction_text`/`find_corequisite_text` were added, but a live connectivity test against 159201 (which has a real, known prerequisite and restriction) came back with *both* empty, not just the new restriction field, prerequisites too. Diagnosing the raw HTML showed why: Massey's current page structure puts the section heading (`<h3 class="course-intro__col-heading">`, e.g. "Prerequisite courses") and the actual course code (`<div class="rich-text">`) in *separate* sibling divs, both children of a shared wrapper, one level apart from what the scraper assumed. The scraper's fallback strategy (heading → immediate next sibling) instead landed on a sub-label div (`<div class="course-intro__col-subheading">`, e.g. "Complete first"), which has no course code in it, found zero codes, and silently returned "no prerequisites found", indistinguishable from a course that genuinely has none. This had presumably been silently wrong for prerequisites too, for however long Massey's site has used this layout, not just newly wrong for the restriction/corequisite addition.
-
-Fixed with a dedicated strategy (`_find_labelled_text`'s Strategy 1) that targets the verified real structure directly: find `.course-intro__col-header`, check its `.course-intro__col-heading` for the section label, then read the code from the *sibling* `.rich-text` div, not the heading's own next sibling. Locked in with a regression test using the verbatim real HTML fetched from massey.ac.nz (`test_find_prereq_and_restriction_real_massey_structure` in `tests/test_prerequisite.py`), not a simplified guess at the structure.
-
-**Lesson for next time a scraper needs fixing here**: a connectivity smoke test that only checks "did we get a 200 and parse *something*" isn't enough, `scripts/test_prereq_scraper.py` was returning cleanly successful-looking output (`prereqs: None restrictions: []`) while being completely wrong. What caught this was checking the result against a *specific known course with a specific known answer* (159201 should never show an empty restriction), and when it didn't match, pulling the raw HTML rather than trusting the parsed output. Any future scraper fix should do the same: verify against at least one course where the right answer is already known independently, not just "did it run without crashing."
-
-The scraper now looks for restriction and corequisite sections too (`find_restriction_text`, `find_corequisite_text` in `prerequisite_scraper.py`), and `refresh_prerequisites.py` writes all three fields from a single page fetch per course. The live re-scrape has since been run: restrictions went from 100% empty to 75.6% empty, corequisites 100% to 93.6% (most courses genuinely have neither, that's expected).
-
-This is not cosmetic. `coursemap/planner/generator.py` already had real logic that blocks scheduling a course if it is in the completed set's restrictions. That logic was correct, but unreachable while `course.restrictions` was always empty. It now has real data to work with.
+`ElectiveFiller` and `search.py`'s `_select_electives` now exclude a candidate if its restrictions overlap anything already in the plan (checked in both directions, since Massey's own pages don't always cross-reference), and track restrictions introduced within the same fill pass so two mutually-restricted candidates ranked in the same batch can't both be picked.
 
 ---
 
-## The old prerequisite data was cross-contaminated
+## Double majors
 
-Diffing the re-scraped `courses.json` against the pre-refresh version turned up 342 courses (out of 869 that had a non-empty prerequisite before) where the old value disappeared after the refresh. That's a big enough number to be worth checking rather than assuming the new scraper regressed, so a sample was checked directly against live Massey pages.
+All double-major generation failures traced to three distinct causes, all now understood:
 
-All three checked were the old data being wrong, not the new scraper missing something. The clearest case: six unrelated 300-level Sport & Exercise papers (`234360` Sport Psychology, `234361` Exercise Psychology, `234216` Sport and Community Development, `234346`, `234312`, `234331`) all had `234236` (Applied Sport Coaching) listed as their prerequisite. `234236` itself has no prerequisite and isn't a logical gate for any of them, per the live regulations it's only a restriction target for an unrelated course. The old scraper was picking up the same course code across a run of unrelated pages, almost certainly bleeding in from a "related courses" widget or similar shared page element rather than the actual Prerequisite(s) section. `275320` and `234360` were checked the same way and showed the same pattern: a specific-looking prerequisite in the old data that simply isn't on the live page at all.
+1. **Mutually-restricted course variants hard-required per major** (e.g. Computer Science requiring `247112` where Mathematics requires the mutually-restricted `247113`) - fixed by converting the hardcoded single-course requirement into a shared `CHOOSE_CREDITS` pool of known variants across 17 affected majors, so any one satisfies the requirement.
+2. **Pool credit accounting didn't recognise an overlap between a pool option and another major's direct requirement** - fixed in `_select_electives`; the overlapping code stays in the pool's candidate list (correctly counted) rather than being stripped and re-filled with a second, possibly-conflicting course.
+3. **No shortfall-tolerant discovery pass for double majors** (single-major generation tolerates a temporary shortfall during discovery and lets `ElectiveFiller` close it; double-major generation didn't) - fixed via `deferred_codes` on `PlanGenerator` plus extending the existing shortfall-tolerance check to cover a deferred required course, not just a short pool.
 
-Net effect: the re-scrape is a real, net improvement, even though the empty-prerequisite rate went up (68.6% → 71.6%) rather than down. A higher empty rate here means "the scraper now correctly says there's nothing" more often, not "the scraper is missing more."
+**Semester-sensitivity:** two more major-pair combinations fail only for one of the two starting semesters (Computer Science + Statistics fails S2, works S1; Computer Science + Data Science is the reverse) - caused by a transitive prerequisite-chain conflict, not a direct restriction. Fixed by having `_select_electives` compute each candidate's non-OR prerequisite closure and check that for restriction conflicts too, plus checking against the other major's direct requirements.
 
----
-
-## ElectiveFiller had no idea restrictions existed
-
-Turning on real restriction data exposed a bug that could never have been caught with synthetic test fixtures, since restrictions were always `[]` until the re-scrape above actually ran: `ElectiveFiller` picks free-elective and named-pool filler courses with zero awareness of the `restrictions` field. A course like `159100` (Programming for Engineering and Technology), restricted against `159101`, would get recommended as filler even when `159101` was already a required course elsewhere in the same plan. `generator.py`'s restriction check (correctly) then rejected the whole plan rather than the filler just picking something else, which is a much worse failure mode for a student than just not seeing that one course suggested.
-
-Same shape of problem as the level-distribution issue elsewhere in this document: a real constraint existed and was correctly checked, but nothing upstream steered candidate selection away from it, so a check that should prevent one bad course from being suggested instead took down the entire plan.
-
-Fixed in `ElectiveFiller.rank_candidates`/`select_to_fill`: candidates are now excluded if their own restrictions overlap with anything already in the plan, or if anything already in the plan restricts against them (scraped restriction data isn't guaranteed to list both directions, Massey's own pages don't always cross-reference each other either, so both directions are checked). Also tracks restrictions introduced by selections made within the same fill pass, since ranking happens once upfront, two candidates that restrict each other could otherwise both pass the initial ranking and both get picked in the same batch.
-
-This fixed roughly a third of the test failures that showed up once real restriction data was in place (a full undergrad-major sweep went from 45 to 37 genuine D/DIS failures, out of 111 majors, after excluding the ~17 majors that are legitimately on-campus-only and were never solvable at D/DIS to begin with). **Not a complete fix.** The same blindness still exists in `search.py`'s `_select_electives`, which handles a major's own named elective pools rather than free-elective filler, that's a separate code path this change doesn't touch. The remaining ~31 failures are a mix of that gap, a genuinely separate double-major-specific issue (see below), and a course that's only offered in Summer School conflicting with `no_summer=True` plans.
+**Not investigated in detail:** general double-major semester-timing sensitivity beyond the two pairs above.
 
 ---
 
-## Double majors: all three original root causes now understood, two fully fixed, one open
+## 45-credit level-progression rule
 
-All 22 double-major test failures traced back to exactly 3 distinct major-pair scenarios once actually catalogued (rather than fixed one at a time): Computer Science + Mathematics, Computer Science + Statistics, and Finance + Marketing. All three are now understood; the first two are fully fixed.
+Massey's General Regulations require 45cr passed at 100-level before enrolling in a 200-level course, and 45cr at 200-level before 300-level - independent of any individual course's own prerequisite. Applies to undergraduate degrees/diplomas/certificates; not to postgraduate qualifications (gated by programme admission instead).
 
-**Root cause 1 (fixed): mutually-restricted "choose one" courses hard-required as a *specific* variant per major.** Massey offers several parallel variants of the same underlying requirement, mutually restricted against each other so a student only takes one (e.g. "Science and Sustainability for ICT" 247112 vs "...for Science" 247113; "Applied Statistics" 161111 vs "Statistics" 161122 vs two others). An earlier fix for the level-progression rule had hardcoded a *specific* variant into each of 19 BSc/BInfoSci majors depending on subject flavour. That's correct for any single major on its own, but Computer Science requiring 247112 while Mathematics requires 247113 (both mutually restricted) makes the *combination* structurally impossible, since a student literally cannot enrol in both. Fixed by converting each major's hardcoded single-course requirement into a shared `CHOOSE_CREDITS` pool listing all known mutually-restricted variants (15 majors touched for the 247xxx cluster, 2 for the 161xxx cluster), so any one satisfies the requirement, matching how Massey's real enrolment works. Verified no course within either affected major's own curriculum depends on the specific variant that was previously hardcoded (checked for any prerequisite naming that exact code non-optionally) before making the change.
+Enforced in `generator.py` during scheduling and both rebalancing passes, gated on qualification level.
 
-**A second bug surfaced while fixing the first**, in `_select_electives`'s pool-selection logic (`search.py`): when a course is both a pool option for one major and a direct hard requirement for another (e.g. Mathematics still hard-requires 161111 directly, which is also one of the 4 options in the new shared pool), the pool's own credit accounting didn't recognise that the required course already satisfied its target. It stripped the overlapping code out of its own candidate list entirely (rather than just not re-selecting it) and went looking for a *second*, independent 15cr from the remaining options, which could easily be a mutually-restricted variant of the one already required. This is what turned "Computer Science + Mathematics" from working (whichever variant CS's pool picked, if it happened to differ from what Mathematics required, this bug would silently break it) into intermittently broken depending on pool sort order. Fixed by keeping the overlapping code in the pool's own candidate list (so its credit contribution is counted correctly) and passing the already-required set into `_select_electives` so it's recognised as already selected rather than reselected. This is the same shape of gap as `ElectiveFiller`'s missing restriction-awareness (see above): a real constraint existed, nothing accounted for it correctly across two independently-authored requirement trees being merged.
-
-**A third, unrelated bug found investigating the second**: Massey's real prerequisite for `161324` (Data Mining) is "one of 161122, 297101, 161220, 161221, 161250 or 161251" (any single one satisfies it), but the scraper's tokenizer always treats a comma as AND, so a flat "one of A, B, C or D" enumeration (no parentheses) parsed as "A and B and C and (D or E)" instead of "any one of A, B, C, D, E". Fixed by detecting a leading "one of"/"any of" marker before a flat comma-separated run and normalising those commas to "or" before tokenizing; parenthesised "one of" clauses that already use explicit "or" internally are untouched. Like the restriction-scraping fix earlier, this is a code fix that doesn't retroactively correct already-scraped data (the original page text isn't kept once parsed), so it only takes effect on the next full re-scrape. `161324`'s specific value was corrected manually as a verified one-off in the meantime (confirmed against the live page directly, not inferred).
-
-**Root cause 2 (fixed): no shortfall-tolerant discovery pass for double majors.** Finance + Marketing (both Bachelor of Business) combined have exactly one unconditional required course between them that isn't part of either major's own elective pools, and it's L300 with zero L100 credit available anywhere in either major's own requirements to ever unlock it. `generate_best_plan`/`generate_filled_plan` (single major) tolerate this kind of shortfall during an internal discovery pass and let `ElectiveFiller` close the gap before a final strict pass; `generate_double_major_plan`/`generate_filled_double_major_plan` never got the same treatment.
-
-A first attempt made the discovery pass unconditionally tolerant and was reverted after it net-negatively affected the full suite (32 failures became 33, previously-working double majors broke, see CHANGELOG.md v2.5.0): changing discovery behaviour for *every* double major, not just the one that needed it, changed pool-selection results for majors that were already fine. The second attempt fixed that specifically: `generate_double_major_plan` now tries the exact original strict call first, completely unchanged, and only on failure retries with a tolerance flag, so a double major that already succeeds is provably unaffected (the fallback code never runs for it at all).
-
-Getting the fallback itself to work end-to-end needed two more pieces: (1) `PlanGenerator` gained a `deferred_codes` mechanism, when a *required* (non-pool) course is permanently blocked by level progression, it's dropped from that discovery pass instead of raising, and the resulting smaller plan correctly produces a bigger gap for `ElectiveFiller` to fill; (2) the existing shortfall-tolerance validation check only recognised "a named pool came up short of its own target" as an acceptable gap, not "a required course is entirely missing", so a deferred required course still failed validation immediately even though deferring it was intentional. Extended that check to also tolerate a missing required course specifically when it's in that same pass's own `deferred_codes`, mirroring the existing pool-shortfall tolerance exactly. Verified: Finance + Marketing now produces a complete, valid 360cr plan with the previously-blocked course correctly scheduled once filler supplies the missing foundation credit, and the full suite has zero regressions from this change (checked specifically for any double major that previously passed and now doesn't; none).
+A sample of 40 undergraduate majors found the following breakdown once checked with the rule enforced:
+- **Genuinely fine (8 of 40):** produce a fully valid plan with no issue.
+- **Pre-existing failures unrelated to this rule (~12 of 40):** e.g. a required Summer-School-only course under a `--no-summer` plan, or majors with no DIS offering at all.
+- **Required-course list itself doesn't add up to 45cr at the level below (~6 of 40)** - e.g. English – BA: `139139` plus a 15cr L200 pool caps at 30cr L200, short of what its 45cr L300 pool needs. Nothing to rearrange; the required-course list as scraped is genuinely incomplete for a DIS-only student.
+- **Named elective pool alone can't supply enough lower-level credit to justify its own higher-level selections (~13 of 40)** - e.g. Accountancy, Spanish, Japanese, Psychology. `_repair_level_progression` swaps within the same pool where possible, and drops an unschedulable higher-level selection to avoid deadlocking generation when no swap exists - but the resulting shortfall can only be closed by courses from that same named pool, since `DegreeValidator`'s pool check only counts a pool's own listed codes. Generic filler cannot satisfy it.
 
 ---
 
-## Single-major sweep: the same parser bug affects far more than double majors
+## Level distribution (max 165cr at 100-level, min 75cr at 300-level)
 
-Everything above this point was found chasing double-major failures specifically. Running the same kind of sweep across all 111 undergrad majors as *single* majors (not combined with anything) found **25 of 111 (22.5%) completely failed** to generate any plan at D/DIS, once the 17 majors that are genuinely on-campus-only (Wellington/Auckland Design and Screen Arts, Animal Science) are excluded. That's a much bigger problem than the double-major cluster, and it's the same root cause discovered there: the "one of A, B, C or D" parser bug (see "The old prerequisite data was cross-contaminated" and the double-major section above), just showing up in more places once actually looked for systematically.
+Separate from the progression rule above. Verified against live regulations: BSc, BA, BCom, and BInfoSci all specify "not more than 165 credits at 100-level" and "at least 75 at 300-level" (Bachelor of Business is 180cr, not 165 - see the comment on `_DEGREE_PROFILES` in `degree_rules.py`).
 
-**Found a reliable way to detect this bug across the whole dataset without re-scraping.** A course's prerequisite is stored as an AND of several codes; if every one of those codes is mutually restricted against every other one (checked using the restriction data, which was scraped correctly), then the AND is a logical impossibility, you cannot simultaneously enrol in courses that are pairwise mutually exclusive, so it's essentially certain the real requirement was "one of these", not "all of these", and the scraper's known comma-handling bug produced an AND where an OR belonged. This isn't a guess: it cross-validates one already-correct field (restrictions) against a field with a known bug class (prerequisites) to find where the second one is provably wrong, independent of needing the original page text back.
+`DegreeProfile` computes the correct numbers, but `build_degree_tree` does not yet emit the corresponding `MaxLevelCreditsRequirement`/`MinLevelCreditsRequirement` nodes - the constraint is not enforced on any plan. `test_build_degree_tree_does_not_yet_emit_level_constraints` pins this as a known gap.
 
-The detector plus manual verification against live Massey pages caught **5 more verified one-off values**: `117201`, `117202` (an "Introduction to Animal Production" cluster, affecting Farm Management, Equine Science, Animal Nutrition and Growth, Sustainable Climate Systems), `123305` (Contemporary Topics in Chemistry, a nested case: "one of these 6 sciences and one of these 4 sustainability courses", previously "all 6 and all 4"), `289250`, `289350` (a Screen Arts professional-cultures pair). Combined with the earlier `161324` fix, that makes 6 manually verified corrections. Single-major sweep improved from 69 to 71 out of 111.
+What is shipped: `PlannerService._level_distribution_state` and `ElectiveFiller`'s `level_credit_limits`/`level_floor_priority` mechanism steer filler selection toward a sensible level distribution even without hard enforcement, and are tested on their own terms.
 
-**This is still a stopgap, not a fix at scale.** Manually verifying and correcting individual courses one at a time doesn't scale to whatever the true remaining count is, and the automated detector is a heuristic (only catches strict pairwise-mutual-restriction cases, misses anything with a nested or partially-corrupted structure). The parser itself is already fixed (see the double-major section above), so **the real fix is running `refresh_prerequisites` again**: every instance of this bug, however many there are, gets corrected in one pass, instead of finding them one at a time by tripping over which major happens to need the broken course.
-
-## Chemistry – Bachelor of Science: a course's own prerequisite is self-contradictory
-
-**Chemistry – Bachelor of Science**, resolved: `123201` ("Chemical Energetics")'s own stored prerequisite was `160101` AND `160102` AND `160105` AND one of `160132`/`160133` - but `160105` mutually restricts every one of the other three codes in that same AND clause, self-contradictory in complete isolation. Live-verified: the real requirement is "one of (123102, 123105, 124104 or 123172) and one of (160101, 160102, 160105, 160132 or 160133)" (see corrections list above). Confirmed by direct test: `parse_prerequisite_text()` already returns the correct tree for this exact phrasing - this was stale data from before that fix shipped, not a current parser gap. Fixing it resolves Chemistry generation entirely, including the `247xxx` graduate-profile pool correctly picking one variant (the previously-documented "picks 3 instead of 1" symptom this note used to describe was a stale diagnosis of the same underlying `123201` problem, not a separate bug). `123331`, `123332`, `141395` (all transitively require `123201`) should also benefit; not individually re-checked.
+What's blocking hard enforcement: `search.py`'s `_select_electives` fully satisfies each elective pool's own nominal credit target independently of any shared budget - when a major's own pool and an injected filler pool are both present, their targets simply add rather than sharing one combined budget. `TotalCreditsRequirement` uses `>=`, so this overshoot currently passes validation silently; a per-level cap would be the first check strict enough to catch it. Fixing this needs `_select_electives`'s pool-budget accounting reworked to share one running budget - `_select_electives` is a ~250-line function used by every generation path, so this needs its own dedicated pass rather than a fix bundled into re-enabling the level-distribution nodes.
 
 ---
 
-## Double majors are sensitive to which semester they start in
+## Offering data gaps
 
-Verifying the fix above turned up a separate, real issue: at least two more major-pair combinations are blocked, but only for one of the two starting semesters. Computer Science + Statistics (BSc) fails starting in S2 but works starting in S1; Computer Science + Data Science (BInfoSci) is the reverse, fails starting in S1 but works in S2. Neither involves Finance, Marketing, or any of the mutually-restricted-variant clusters fixed above, different courses, different mechanism. The Computer Science + Statistics case traces to `159224`/`159323` (both just options within a 10/12-option elective pool, not required directly) needing `160105` via their own prerequisite chain, which is restricted against `160101` (a course Statistics directly requires) -- a real conflict, but a *transitive* one, working out through a prerequisite chain rather than a course's own direct restrictions, which is a step further than the direct-restriction-awareness fix already shipped for `ElectiveFiller`/`_select_electives` covers. The CLI defaults to today's actual month to guess a starting semester, so this is why the exact set of "broken" double majors can look different depending on what day you run it.
+**323 courses** (marked `?` in the UI) are required in a major but have no confirmed 2026 offering data - given an inferred offering based on other courses in the same subject prefix, or whether the title suggests a flexible "Special Topic"/thesis course. Refresh with:
 
-Fixed: `_select_electives` now computes each pool candidate's unavoidable (non-OR) prerequisite closure and checks it for restriction conflicts too, not just the candidate's own restrictions field, and also checks against the other major's direct requirements (previously invisible to pool selection entirely). Regression test: `test_select_electives_skips_course_whose_forced_prereq_conflicts` in `tests/test_integration.py`.
-
-Two more cases:
-
-- **Mathematics – Bachelor of Science**, resolved: directly requires `160101` and `160102`, and its own L200 pool has exactly 4 candidates for a 60cr target (all 4 mandatory), one of which (`160212`) was recorded with a prerequisite requiring `160105`, which mutually restricts both `160101` and `160102`. Live-verified: `160212`'s real prerequisite is "one of (...) and one of (...)" (see corrections list above), not the flat AND that was stored - correcting the stored data resolves this without any scheduler change.
-- **Animal Science – Master of Science**, resolved: directly required both `119728` and `162760` as separate COURSE nodes, which mutually restrict each other. Live-verified against the qualification's "Courses you can enrol in" page: the real structure is "Part One: 30 credits from" a pool of `117709`/`119728`/`162760`, not three separate hard requirements. Fixed `majors.json` to a `CHOOSE_CREDITS(30, [117709, 119728, 162760])` pool. While verifying this, also found and fixed the same "Part Two" structure was wrong in a different way: it was two separate `CHOOSE_CREDITS` nodes ALL_OF'd together (120cr thesis pool AND 60cr research-report pool), forcing every student down the thesis path, when the real page says "Either [90-120cr thesis] Or [60cr research report]" - a genuine choice between two paths. Fixed using the schema's existing `ANY_OF` node type (already fully supported, just not previously used for this major).
-  - Fixing the pool structure surfaced a separate, real bug in `_select_electives`: the "not enough schedulable courses, include everything" fallback path had zero restriction-conflict checking, unlike the main selection loop and top-up pass (both already fixed earlier this file's history). `117709` is M/INT-only, so only `119728` (15cr) counted as D/DIS-schedulable toward the 30cr pool target, triggering that fallback - which used to add `162760` unconditionally despite it directly restricting `119728`. Fixed; regression test `test_select_electives_fallback_path_checks_conflicts`, proven against pre-fix code.
-  - Even with both fixes, Animal Science MSc still can't generate a D/DIS plan - not a restriction bug anymore, a genuine greedy-ordering limitation. `119728` gets picked first (nothing conflicts with it yet), which then blocks `162760` (the only single course that could satisfy the whole 30cr pool alone) - and `117709` isn't D/DIS-schedulable to make up the difference. The scheduler doesn't backtrack to reconsider an earlier pick once a later one turns out to be blocked. M/INT works today (`117709` becomes usable, giving the pool a third non-conflicting option). A real fix needs either backtracking in `_select_electives` or a smarter tie-break (e.g. preferring a candidate that can single-handedly satisfy a pool's target over one that only partially does), neither implemented.
-
----
-
-## Offering Data Gaps
-
-**323 courses** (marked with `?` in the UI) are required in major programmes but have no confirmed 2026 offering data. These were given inferred offerings based on:
-- Patterns from other courses in the same subject prefix
-- Whether the course title suggests it is a flexible "Special Topic" or thesis
-
-To get real offering data, the scraper must be re-run. The full refresh pipeline is:
 ```bash
 python -m coursemap.ingestion.build_dataset
 ```
 
 ---
 
-## Majors with Weak Data
+## Majors with weak data
 
-**4 majors** have no specific required course codes (entire degree is "free electives"):
-- Biological Sciences – Postgraduate Diploma in Science and Technology
-- Expressive Arts and Media Studies – Bachelor of Communication
-- Without Specialisation – Graduate Certificate in Arts
-- Without Specialisation – Graduate Diploma in Arts
+**4 majors** have no specific required course codes at all (entire degree modelled as free electives): Biological Sciences – Postgraduate Diploma in Science and Technology; Expressive Arts and Media Studies – Bachelor of Communication; Without Specialisation – Graduate Certificate in Arts; Without Specialisation – Graduate Diploma in Arts.
 
-**89 majors** have >200cr of free elective gaps (the major requirement tree only specifies a subset of the degree).
-
-For these majors, the planner fills electives automatically but the result is not based on real programme regulations.
-
-**~36 majors (9.5%)** have scraped data listing more "required" courses than the degree's credit target allows for. For example, a 120cr diploma whose major data lists 165cr of compulsory-looking course codes. This is concentrated in postgraduate Psychology, Education, and Māori Studies programmes, and is almost always because the source data flattened several alternative specialisation tracks into one list, rather than the degree genuinely requiring more credits than it awards.
-
-The planner copes with this by capping the *droppable* portion of the required-course list to fit the credit budget, but it will never drop a course the degree's own validation tree explicitly checks as required, even if that means the final plan ends up *over* the degree's credit target. This was a deliberate fix made after auditing this dataset: an earlier version of the trim logic counted only each kept course's own credits with no visibility into prerequisite-chain cost, which let it sometimes drop a genuinely-required course purely because the (incomplete) credit math looked like there was room to spare, producing a plan that *looked* complete (right total credits) but silently failed validation for whichever course got dropped. An over-the-target credit total is a more honest failure mode than a plausible-looking one that's secretly missing a required course: it's visibly wrong rather than invisibly wrong.
-
-For a handful of majors with this pattern, the result is therefore a plan that legitimately can't fit within the stated degree length using only DIS-offered courses. That's a real fact about the source data (more required courses + prerequisite chains than the degree credits for), not something a planning algorithm can paper over. The actual fix is re-scraping these specific majors' requirement pages and modelling the alternative tracks as real choice structures, not a smarter scheduler.
-
----
-
-## The 45cr Level-Progression Rule
-
-Massey's General Regulations (for undergraduate degrees, diplomas, certificates, and graduate diplomas/certificates) include a rule separate from any individual course's prerequisites: **a student cannot enrol in a 200-level course without 45cr passed at 100-level, nor in a 300-level course without 45cr passed at 200-level.** This applies regardless of whether any specific course names a prerequisite. It's a blanket progression gate, and it does not apply to postgraduate qualifications (NZQF level 8+), which are gated by programme admission instead.
-
-This rule was not enforced anywhere in the planner until this audit, even though `courses.json` has everything needed to check it. The generator (`coursemap/planner/generator.py`) now enforces it during scheduling and during both rebalancing passes, gated on qualification level so postgraduate majors (e.g. the Master of Specialist Teaching family, which routinely has required L300 courses with no L200 chain at all) are correctly exempted.
-
-Turning this rule on surfaced real, pre-existing problems across a substantial share of the dataset. A random sample of 40 undergraduate majors found only 8 (20%) currently produce a `generate_filled_plan` plan that genuinely satisfies all of the major's own elective-pool requirements once checked properly (`keep_open_pools=True`, not just a credit-total check, see below for why that distinction matters). The other 32 split into three genuinely different categories, confirmed by testing each one with the rule forcibly disabled to isolate cause:
-
-**1. Pre-existing failures unrelated to this rule (~12 of 40 sampled).** Things like a required course only offered in Summer School while `--no-summer` is set (Environmental Science, Ecology and Conservation, see the separate Summer School note elsewhere in this file), or majors with zero DIS offerings at all (several Bachelor of Design majors, evidently on-campus-only programmes). These fail identically whether the level-progression rule is on or off, confirming they predate this audit entirely.
-
-**2. Required courses that cannot, by themselves, reach the credit needed to unlock a later required course (~6 of 40 sampled, e.g. Te Reo Māori, Educational Psychology, Media Studies, Linguistics, Property).** `_repair_level_progression`'s swap/drop mechanism only ever touches *elective pool* selections. Required (non-pool) courses are always kept, by design, since dropping an actually-required course would silently produce an incomplete degree. When the required-course list itself doesn't add up to 45cr at the level below a later required course, there's nothing the scheduler can rearrange; the major's required-course list, as scraped, is genuinely incomplete for a DIS student following only what's listed as required. This is the same root cause already documented for Chinese, Bachelor of Arts (below), confirmed, not a new bug, just newly visible because nothing previously checked for it. English, Bachelor of Arts has the identical shape outside the original sample: `139139` plus a 15cr L200 pool cap out at 30cr L200, short of the 45cr its 45cr L300 pool (`139305` etc.) needs.
-
-**3. Named elective pools that cannot, on their own, supply enough lower-level credit to justify their own higher-level selections (~13 of 40 sampled, e.g. Accountancy, Spanish, Japanese, Psychology, Ecology and Conservation, Business Analytics, Software Engineering).** `_select_electives` (in `coursemap/optimisation/search.py`) picks each pool's minimum-cost subset independently, with no visibility into whether the combined selection across pools satisfies the 45cr rule. A repair pass (`_repair_level_progression`) handles same-pool swaps (trading a higher-level pool member for an unselected lower-level one from the *same* pool, since pool credit can't cross-subsidise (confirmed the hard way: an early version that swapped across pools silently broke the donor pool's own target)) and, when no swap exists, drops the unschedulable higher-level selection so the *discovery* pass doesn't deadlock the whole search. This successfully avoids exceptions, but the resulting credit shortfall can only be closed by **courses that are members of that specific named pool**.
-`DegreeValidator`'s `ChooseCreditsRequirement` check (`coursemap/validation/engine.py`) only counts a pool's own listed `course_codes`, so generic filler from outside the major, however well it's prioritised, structurally cannot satisfy it.
-
-  An `ElectiveFiller` "level-gate-aware" tier was built and tested specifically to try to close this (see `needed_levels` in `coursemap/planner/elective_filler.py` and `PlannerService.last_needed_levels`). It correctly biases filler toward the level a gate still needs, and it did fix one separate, real bug along the way (the tier was initially sorted by *shortfall amount* rather than by level, which could let it select an L200 filler course before enough L100 credit existed to make that very course schedulable (found via this same sweep, fixed, confirmed against Spanish, Business Analytics, and Japanese, which no longer throw an exception). But it cannot and does not close the *named-pool-satisfaction* gap itself, because the credit it adds isn't a member of the pool the validator checks. Properly fixing this needs either a schema change (letting a course count toward a named pool's target even when sourced from outside the major, itself a real-world question of whether Massey actually intends that) or a data-modelling correction (the named pool's course list may not be the only way Massey intends a student to satisfy it). Left as a documented limitation, not worked around with a smarter filler. That path was tried and shown not to work.
-
-A handful of majors from category 3 are marked `xfail(strict=True)` in `tests/test_integration.py` as concrete, regression-tested examples (Ecology and Conservation, Psychology [implied by Chinese's pattern], Accountancy, Chinese, Japanese, Creative Writing, Finance, Education) rather than silently skipped, so the suite fails loudly if this regresses further, and `test_filled_plan_reaches_degree_target` itself was strengthened to check actual pool satisfaction (`keep_open_pools=True`) rather than just the credit total. The credit-total-only version of this test was passing for several of these majors even before that fix, which is exactly how this systemic issue went unnoticed for as long as it did.
-
-**English's own dedicated test (`test_ba_english_plan_is_valid`) is now marked `xfail(strict=True)` too**, matching what this section already said above. It previously asserted success unconditionally - the gap between what this document said and what the test actually checked went unnoticed until a routine baseline run surfaced it as an unexplained failure. Fixed by aligning the test with the documented finding, not by changing the finding. A second test (`test_generator_horizon_counts_active_semesters`) had separately picked English specifically *because* it was believed to be unaffected by this rule - that belief was already wrong by the time it was written down; it's been rebuilt on a synthetic course chain so it no longer depends on any real major's data at all. See CHANGELOG.md.
-
-**Chinese, Bachelor of Arts** (category 2 above) was the first case found, before the broader sweep: it has only 30cr of required L200 courses (`241201`, `241202`) and no required course that reaches the 45cr needed to unlock its L300 courses. The major's L200/L300 elective pool exists but is advisory-only (`subject_hint`, not a real choice structure), so the planner has no principled way to know a student should deliberately pick a third L200 Chinese elective. A real student in this position would need either a Course Advisor override or to self-select extra L200 papers. This is a fact about the major's required-course list, not a bug in the scheduler.
-
----
-
-## Level Distribution (max 165cr at 100-level / min 75cr at 300-level)
-
-Separate from the 45cr level-*progression* rule above (which gates *when* a course becomes schedulable), most 360cr Level 7 bachelor's degrees also carry a level-*distribution* rule on the finished plan as a whole: verified against live regulations for BSc, BA, BCom, and BInfoSci, all four specify "not more than 165 credits at 100-level" and "at least 75 credits at 300-level" (Bachelor of Business is a known exception at 180cr, not 165, see the caveat comment on `_DEGREE_PROFILES` in `degree_rules.py`).
-
-`degree_rules.py`'s `DegreeProfile` has always computed the correct numbers for this (`max_level_100=165`, `min_level_300=75` for `profile_for(7, 3)`), but `build_degree_tree` never turned them into `MaxLevelCreditsRequirement`/`MinLevelCreditsRequirement` nodes, so the constraint was silently never checked, on any plan, ever. The node classes themselves, their serialization, and their UI rendering were all already fully built and tested, they were just never constructed by anything.
-
-**Two attempts to wire this in, both reverted, for two different reasons.**
-
-**Attempt 1** just constructed the nodes from the profile and enforced them. Reverted immediately: `ElectiveFiller`/`PlanSearch` had no concept of level distribution to aim for while filling, they'll happily fill a plan mostly with 100-level electives if those are the most convenient schedulable candidates, with nothing steering credits toward 300-level or away from 100-level as the totals accumulate. 17 tests failed; concretely, **Computer Science – Bachelor of Information Sciences** generated at 195cr/165cr-cap at 100-level and 60cr/75cr-min at 300-level, **Mathematics – Bachelor of Science** failed the same way, and **Human Nutrition – Bachelor of Science** landed at 345cr/360cr total as a knock-on effect.
-
-**Attempt 2** fixed exactly that: `PlannerService._level_distribution_state` computes how much L100 room is left and how short of the L300 floor the plan is, and `ElectiveFiller` got a dedicated `level_credit_limits` hard cap plus its own priority tier for the distribution floor (`level_floor_priority`, Tier 1, one below the existing level-progression Tier 2, see `ElectiveFiller`'s class docstring for why they can't share a tier or a dict: doing so first caused a starvation bug where a real case, Creative Writing–Bachelor of Arts, marked L100/L200/L300 all "needed" via the same mechanism, and since that tier sorts level-ascending, the L100/L200 entries consumed the whole fill budget before the ranked list ever reached L300). This fixed the two majors Attempt 1 broke. But turning the hard validation back on with this fix in place surfaced a **second, unrelated, pre-existing issue**: `PlanSearch._select_electives` always fully satisfies every elective pool's own nominal `credits` target, completely independent of the `elective_budget` parameter passed in (only its zero-credit-pool top-up pass, and an explicit over-capture cap, actually look at that budget). When `generate_filled_plan` injects a filler pool alongside a major's own already-sized pool, the two pools' nominal targets simply add together rather than sharing one combined budget. This was already happening before either level-distribution attempt, just invisible, since `TotalCreditsRequirement` uses `>=`, so a plan with a few too many total credits never failed validation. A hard per-level cap is the first constraint sensitive enough to notice the overshoot: **Computer Science – Bachelor of Science** (with prior/transfer credits in the plan) generated at 210cr/165cr-cap at 100-level, and Creative Writing reappeared at 195cr/165cr-cap even with the Tier 1 fix in place, because the extra credit wasn't coming from the filler's own selection (which was correctly capped), it was coming from the major's own pool being independently over-satisfied on top of it.
-
-Fixing that needs changes to `_select_electives`'s pool-budget accounting in `search.py`, sharing one running budget across every known-credit pool (the major's own plus any injected filler pool) instead of letting each pool's nominal target stand alone, a separate, larger piece of work than this feature's own wiring, since `_select_electives` is a ~250-line function used by every plan generation path, not something to touch inside a single-issue fix without its own dedicated pass and test sweep.
-
-**What's shipped vs what isn't:** `PlannerService._level_distribution_state` and `ElectiveFiller`'s `level_credit_limits`/`level_floor_priority` mechanism are kept. They are correct on their own and make filler selection more sensibly distributed even without hard enforcement (see `tests/test_units.py::TestDegreeRules` and `ElectiveFiller`'s own tests). `build_degree_tree` still does not emit `MaxLevelCreditsRequirement`/`MinLevelCreditsRequirement`; `test_build_degree_tree_does_not_yet_emit_level_constraints` pins this so any future work has to revisit it deliberately. `_select_electives`'s budget-sharing should be fixed before hard level-distribution enforcement is enabled.
+**89 majors** have >200cr of free-elective gap - the requirement tree only specifies a subset of the degree, and the planner fills the rest automatically without that fill being based on real programme regulations.
 
 ---
 
 ## Minors
 
-The 39 minors in `datasets/minors.json` are hand-curated from the Massey handbook. They are approximate:
-- Course code lists may not match the current year's handbook
-- Level requirements (L100/200/300 credit splits) are typical but may vary by programme
-- These have NOT been individually cross-checked against live Massey pages the way the Computer Science prerequisite chain was. Treat them with the same "verify before enrolling" caution as any unverified prerequisite data
-
-To add more minors, edit `datasets/minors.json` following the existing structure.
+The 39 minors in `datasets/minors.json` are pattern-inferred from the course dataset, not scraped from or verified against individual Massey minor pages (each entry's own `note` field says so explicitly). `scripts/scrape_minors.py` exists to do a real per-minor page scrape instead, but hasn't been run against the shipped data yet - every entry is still `data_quality: "inferred"`, not `"scraped"`. Course code lists may not match the current handbook year; level splits are typical but may vary by programme. Treat with the same caution as unverified prerequisite data.
 
 ---
 
-## Re-scraping the Full Dataset
+## Re-scraping the full dataset
 
-> ⚠️ Requires Massey's website to be accessible (blocked in some server/CI environments).
+Requires the Massey website to be reachable (blocked in some CI/server environments).
 
 ```bash
-# Full re-scrape (takes several hours):
+# Full re-scrape (several hours)
 python -m coursemap.ingestion.build_dataset
 
-# Faster: only refresh courses, not majors/quals:
+# Faster - courses only, not majors/quals
 python -m coursemap.ingestion.refresh_prerequisites
 
-# After any re-scrape, repair the data:
+# After any re-scrape
 python -m coursemap.ingestion.repair_dataset
 ```
 
-After re-scraping, restart the server. The dataset is cached at startup.
+Restart the server afterward - the dataset is cached at startup.
 
-## Known Open Items
+---
 
-**The mis-encoded Either/Or hypothesis is confirmed** on 4 of the original 43 majors `scripts/audit_pool_overlap.py` flags, all Master of Arts specialisations: Geography, Education, English, Sociology. Live-verified against each qualification's "Courses you can enrol in" page - all four have a real Part Two "Either [90-120cr thesis] Or [60cr research report]" choice, currently stored as both required simultaneously.
+## Systemic-check tooling
 
-**Fixed and shipped for 3 of the 4: Geography, English, Sociology.** Getting there needed three fixes in `search.py` first (see CHANGELOG.md "Fixed: Part 1/Part 2 pairing, properly this time" and "Fixed: exact-fit preference"), not just the `ANY_OF` re-encoding itself:
-1. The Part 1/Part 2 pairing safeguard used a regex that only matched Roman numerals, never the Arabic digits every real course title actually uses, so it never fired.
-2. `_trim_plan_to_credit_target`'s pool removal had no concept of a dependent pair, so it could remove one half of a split enrolment while keeping the other.
-3. The greedy elective sweep had no real preference for an exact single-course credit match over a fragmented multi-course selection - which course it picked was really just an artifact of code-numbering coincidence. A genuine preference was added.
+`scripts/audit_prereq_contradictions.py` finds courses whose own stored prerequisite requires two mutually-restricting codes in the same AND clause - almost always a scraper error (a "one of A, B, C" list parsed as a flat AND). One confirmed exception: `241304`/`241305`, where the AND is genuinely correct (see the prerequisite corrections list above). Run after every re-scrape.
 
-With all three in place, each of these three majors turned out to have a same-credit standalone alternative to its thesis pair (e.g. a 60cr "Research Report"), so the fix now picks that cleanly with zero credit overshoot - verified against real `DegreeValidator`, not just plan content. `test_ma_majors_include_exactly_one_part_two_path` covers these three for real now, not as an `xfail`.
+`scripts/audit_pool_overlap.py` finds majors where two supposedly-both-required parts of a requirement tree share course codes - the signature of a mis-encoded either/or choice. A legitimately-both-required shared pool looks identical from the data alone, so do not bulk-apply a fix from its output; verify each candidate against a live page first.
 
-**Education is not yet fixed - a distinct, new bug.** Applying the same `ANY_OF` re-encoding to it surfaces a bug the other three didn't hit: the elective top-up pass reaches back into a named pool that's already met its own credit target once the total `elective_budget` exceeds the sum of all named pool targets, and adds a *second* course from that same already-satisfied pool (observed: both the 60cr and 45cr "Professional Inquiry" variants selected together). The subsequent credit trim then removes the original correct 60cr choice and keeps the insufficient 45cr one, purely because of `(-level, code)` removal order, not because it's the better choice - leaving the pool short. Needs the top-up pass to skip pools already at their own target; not yet fixed. `test_education_ma_part_two_not_yet_fixed` documents this specifically, `xfail(strict=True)`.
+---
 
-Animal Science's **Part One** fix (the `CHOOSE_CREDITS(30, [117709, 119728, 162760])` pool, resolving the `119728`/`162760` restriction conflict) does not depend on `ANY_OF` and was kept - confirmed still correct and regression-tested. Its **Part Two** is a non-overlapping-codes variant of the same Either/Or mis-encoding (one branch is a single course, `117887` "Research Report", sharing no codes with the thesis branch - so `audit_pool_overlap.py`'s code-overlap heuristic can't even detect this shape). Tested with `ANY_OF` applied in memory: still fails in D/DIS mode, but for the pre-existing, already-documented greedy-ordering limitation (see "Attempt 2" above), not either of the two bugs just fixed. Left as the original two-`CHOOSE_CREDITS`-pools-under-`ALL_OF` shape in `majors.json`.
+## Open items
 
-**40 majors remain unverified** (43 originally flagged, minus the 3 now fixed - they no longer match the overlap heuristic since they're `ANY_OF` now, not two `ALL_OF`-required siblings), heavily concentrated in the same Master of Arts cluster (nearly every specialisation shares the identical `(60cr, 120cr)` shape) - strong evidence the remaining ones are the same *data* bug. Each one still needs its own live page checked before changing `majors.json`, same as before; the mechanism to apply the fix once verified is solid now for majors shaped like Geography/English/Sociology, but the Education-shaped top-up bug should be fixed first if a candidate major turns out to have that shape too.
-
-`scripts/audit_pool_overlap.py` finds this pattern across the whole dataset. Do NOT bulk-apply a fix without checking at least a few individually first, since a shared course pool between two *legitimately both-required* parts of a major would also trigger this heuristic and looks identical from the data alone.
-
-`scripts/audit_prereq_contradictions.py` finds courses whose own stored
-prerequisite requires two mutually-restricting codes in the same AND
-clause - almost always a scraper error (a "one of A, B, C" list parsed
-as a flat AND), though not automatically proof; one confirmed exception
-is documented in the corrections list above (`241304`/`241305`, where
-the AND is genuinely correct and the flag is a false positive from that
-course pair's own restriction data, unverified). Run it after every
-re-scrape. Six of its first eight hits are now fixed and cited above
-(`160212`, `123201`, `117226`, `117243`, `120303`, `286321`); the two
-that remain (`241304`, `241305`) are the confirmed non-bug.
-
-Full history of what was found and fixed, and when, is in CHANGELOG.md.
-This section is the current, still-open list only.
-
-**Double-major semester-timing sensitivity.** Not investigated in detail.
-
-**10 majors in the D/DIS sweep fail with a generic "No schedulable
-courses remain" error, not individually traced.** Two spot-checked:
-- `234338` (Sport and Exercise Practicum) has a 6-course flat AND
-  prerequisite (`234214`, `234215`, `234236`, `234243`, `152237`,
-  `152238`, all L200, all offered D/DIS). Six concurrent L200
-  prerequisites for one course has the same shape as the comma-parser
-  bug ("one of A, B, C, D, E, F" misread as "all of"), but none of the
-  six restrict each other in the current dataset, so the
-  mutual-restriction cross-check that found other instances of this bug
-  didn't catch it. Worth checking against the live page first.
-- `256304` (Positive Learning Environments, requires `256201`) and
-  `233209` (Earth's Critical Resources, requires `233105`) each have a
-  single valid D/DIS prerequisite with no prerequisite of its own - not
-  a data-parsing issue, looks like a scheduling-horizon limitation
-  instead. Not investigated further.
-
-**"One of"/"any of" detection in `prerequisite_scraper.py` only fires on
-those two exact phrases.** Other wording for the same meaning ("Choice
-of X, Y, Z", "Either X, Y or Z", "Select one of X, Y") would still fall
-back to comma-as-AND, reproducing the original bug under different
-phrasing. Not fixed without a live example - guessing at phrasing
-variants risks introducing a wrong pattern. Worth grepping a dry-run's
-output for "of " near comma-separated code lists that didn't get OR
-treatment.
-
-**Parenthesized "one of" lists may exist beyond the one confirmed
-course.** `123305`'s page uses a bare parenthesized comma list with no
-explicit "or"s; the regex now handles that exact shape. Unknown whether
-other courses use the same phrasing or something still different. Worth
-grepping a dry-run's debug output for `"of ("`.
-
-**Whether the Oxford-comma tokenizer bug (comma directly followed by a
-literal "and"/"or") already corrupted anything in the current
-`courses.json`.** The fix only affects future scrapes. Worth checking
-during the next re-scrape's dry-run: any course whose prerequisite text
-contains ", and" or ", or" should parse to the expected number of
-top-level AND args, not one.
-
-**Mechanism behind stale content being served under sustained request
-volume is not independently confirmed.** CDN edge caching under origin
-load is the leading theory, consistent with every observation, but
-unverified against Massey's actual infrastructure. The regression-guard
-fix (`_is_suspicious_regression`) detects the symptom rather than
-depending on the cause, so this doesn't block anything - it's just
-genuinely unknown.
+- Qualification pathway choice (prior-study-dependent credit totals): a manual `credits_override` exists for MSc, but there's still no general, planner-detected solution - see "Qualification credit totals" above.
+- TESOL – Master of Applied Linguistics correlated pathway + over-specification, unresolved.
+- ~39 further Master of Arts specialisations sharing Education/Geography's Part One shape, unverified.
+- Education – MA Part Two: 15cr prerequisite discrepancy against the qualification's own stated total, unresolved (`xfail`, see above).
+- Human Resource Management – MBS, Economics – MA and the broader ~36-major over-specified-required-list category need re-scraping and remodelling as genuine choice structures, not a scheduler fix.
+- Level-distribution hard enforcement blocked on `_select_electives` pool-budget sharing (see above).
+- `search.py` is ~1,960 lines and due for a split by concern.
+- Massey-specific assumptions run through the domain/rules/scraper layers; multi-university support needs an abstraction pass, not a toggle.
+- Prerequisite "one of"/"any of" detection only fires on those two exact phrases - other wording (e.g. "Choice of X, Y, Z") falls back to comma-as-AND and would reproduce the original bug under different wording. Not fixed without a confirmed live example.
+- Whether the current dataset has any course whose prerequisite text contains a literal ", and" or ", or" that a since-fixed tokenizer bug corrupted is unconfirmed - the fix only affects future scrapes; worth checking on the next re-scrape's dry run.
+- Animal Science – MSc still cannot generate a D/DIS plan even with its data corrected - a genuine greedy-ordering limitation in `_select_electives` (it doesn't backtrack once an earlier pick blocks a later one), not a data or restriction bug.
