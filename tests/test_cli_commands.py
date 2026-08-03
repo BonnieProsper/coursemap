@@ -2,7 +2,7 @@
 CLI command coverage: majors, courses, minors, validate, data-quality, and
 plan option combinations not already covered elsewhere.
 
-coursemap/cli/main.py sat at 35-39% coverage for most of the repo's
+coursemap/cli/main.py sat at 35-39% coverage for most of this project's
 history: the argparse dispatch layer and most command bodies had zero
 direct tests, which is exactly why the --no-summer bug (see
 test_cli_summer_flag.py) went undetected for as long as it did. These tests
@@ -385,6 +385,41 @@ def test_plan_double_major_text_output_shows_shared_courses(monkeypatch, capsys,
         "--format", "text", "--output", str(out),
     ])
     assert "Double major" in stdout
+
+
+def test_plan_double_major_requirements_check_is_real_not_unconditional(monkeypatch, capsys, tmp_path):
+    """
+    Regression test: 'Both major requirements: satisfied' used to print
+    unconditionally for every double major, with no actual check behind
+    it at all (see DATA_QUALITY.md/CHANGELOG.md - the CLI's version of
+    the same gap already fixed in the API's _build_gap_meta).
+
+    Computer Science - BInfSci + Animal Science - MSc, without
+    --auto-fill: a real, unfilled free-electives gap in Computer Science
+    (confirmed via the equivalent API test,
+    test_plan_double_major_structural_errors_checks_both_majors in
+    test_api.py) must now be reported as NOT satisfied, with the actual
+    error shown - not silently claimed complete. With --auto-fill, the
+    same gap is closed and the plan is genuinely satisfied.
+    """
+    out = tmp_path / "plan.json"
+    stdout, _ = _run_capture(monkeypatch, capsys, [
+        "plan", "--major", "Computer Science – Bachelor of Information Sciences",
+        "--double-major", "Animal Science – Master of Science",
+        "--campus", "D", "--mode", "DIS", "--no-summer",
+        "--format", "text", "--output", str(out),
+    ])
+    assert "Both major requirements: NOT fully satisfied" in stdout
+    assert "Computer Science" in stdout
+
+    out2 = tmp_path / "plan2.json"
+    stdout2, _ = _run_capture(monkeypatch, capsys, [
+        "plan", "--major", "Computer Science – Bachelor of Information Sciences",
+        "--double-major", "Animal Science – Master of Science",
+        "--campus", "D", "--mode", "DIS", "--no-summer", "--auto-fill",
+        "--format", "text", "--output", str(out2),
+    ])
+    assert "Both major requirements: satisfied" in stdout2
 
 
 def test_plan_text_output_shows_completed_courses_in_header(monkeypatch, capsys, tmp_path):

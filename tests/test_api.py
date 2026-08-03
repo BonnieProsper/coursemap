@@ -5,12 +5,11 @@ Uses FastAPI's TestClient (HTTPX-backed, no real server needed).
 """
 from __future__ import annotations
 
-import json
 
 import pytest
 from fastapi.testclient import TestClient
 
-from coursemap.api.server import app, _svc, _courses
+from coursemap.api.server import app, _svc
 
 client = TestClient(app, raise_server_exceptions=True)
 
@@ -220,6 +219,34 @@ def _base_plan_request(**overrides) -> dict:
     return base
 
 
+def test_pathway_notice_endpoint_flags_msc_and_ignores_unrelated_major():
+    r = client.get("/api/majors/pathway-notice", params={"name": "Animal Science – Master of Science"})
+    assert r.status_code == 200
+    notice = r.json()["notice"]
+    assert notice is not None
+    assert "180cr" in notice and "240cr" in notice
+
+    r2 = client.get("/api/majors/pathway-notice", params={"name": "Computer Science"})
+    assert r2.status_code == 200
+    assert r2.json()["notice"] is None
+
+
+def test_plan_surfaces_pathway_notice_as_warning_unless_overridden():
+    r = client.post("/api/plan", json=_base_plan_request(
+        major="Earth Science – Master of Science", campus="D", mode="DIS",
+    ))
+    assert r.status_code == 200
+    assert any("180cr" in w and "240cr" in w for w in r.json()["warnings"])
+
+    r2 = client.post("/api/plan", json=_base_plan_request(
+        major="Earth Science – Master of Science", campus="D", mode="DIS",
+        credits_override=240,
+    ))
+    assert r2.status_code == 200
+    assert not any("180cr" in w for w in r2.json()["warnings"])
+    assert r2.json()["meta"]["degree_target"] == 240
+
+
 def test_plan_basic():
     r = client.post("/api/plan", json=_base_plan_request())
     assert r.status_code == 200
@@ -323,6 +350,79 @@ def test_plan_double_major():
     assert "second_label" in dmi
     assert isinstance(dmi["shared_codes"], list)
     assert dmi["saved_credits"] >= 0
+
+
+def test_plan_single_major_no_autofill_does_not_falsely_report_free_electives():
+    """
+    Regression test: a single-major BSc/BA plan generated without auto_fill
+    always leaves its free-elective pool open by design - that's what
+    residual_gap/gap_explanation already report. DegreeValidator's
+    "Free electives: have Xcr, need Ycr..." message used to leak into
+    structural_errors/warnings for every such plan (100% of the time,
+    since the pool is guaranteed unfilled pre-auto-fill), making a
+    perfectly correct plan look broken. Confirmed as a real defect in
+    tracked code, not a caching artifact, before fixing: DegreeValidator
+    is genuinely called with keep_open_pools=True regardless of whether
+    the plan was auto-filled.
+    """
+    r = client.post("/api/plan", json=_base_plan_request(
+        major="Computer Science", auto_fill=False,
+    ))
+    assert r.status_code == 200
+    data = r.json()
+    assert data["meta"]["free_elective_gap"] > 0, "test assumes a real, unfilled gap"
+    assert not any(
+        e.startswith("Free electives:") or "Free electives:" in e
+        for e in data["meta"]["structural_errors"]
+    )
+    assert not any("Free electives:" in w for w in data["warnings"])
+
+    # A genuinely broken plan (a real structural problem, not just an open
+    # free-elective pool) must still surface - this fix only suppresses the
+    # one specific, always-redundant message, not structural checking itself.
+    r2 = client.post("/api/plan", json=_base_plan_request(
+        major="Computer Science", auto_fill=True,
+    ))
+    assert r2.status_code == 200
+    assert r2.json()["meta"]["structural_errors"] == []
+
+
+def test_plan_double_major_structural_errors_checks_both_majors():
+    """
+    Regression test for wiring up structural validation for double majors
+    (previously skipped entirely - see DATA_QUALITY.md/CHANGELOG.md).
+    Verified live through the real /api/plan endpoint, not just a unit
+    test: without auto_fill, a real Computer Science + Animal Science
+    double-major plan leaves Computer
+    Science's own free-electives pool unmet (a genuine, previously-
+    invisible gap the old double-major-skipping code would never have
+    surfaced), correctly prefixed with which major it belongs to. With
+    auto_fill, the filler closes that same gap and structural_errors goes
+    back to empty - confirming the check reacts to the plan's actual
+    state rather than always firing or always staying silent for double
+    majors.
+    """
+    r = client.post("/api/plan", json=_base_plan_request(
+        major="Computer Science – Bachelor of Information Sciences",
+        double_major="Animal Science – Master of Science",
+        campus="D", mode="DIS", no_summer=True, auto_fill=False,
+    ))
+    assert r.status_code == 200
+    errors = r.json()["meta"]["structural_errors"]
+    assert errors, "expected a real, unfilled gap to surface as a structural error"
+    assert any("Computer Science" in e for e in errors), (
+        "the error should be prefixed with which major it belongs to"
+    )
+
+    r2 = client.post("/api/plan", json=_base_plan_request(
+        major="Computer Science – Bachelor of Information Sciences",
+        double_major="Animal Science – Master of Science",
+        campus="D", mode="DIS", no_summer=True, auto_fill=True,
+    ))
+    assert r2.status_code == 200
+    assert r2.json()["meta"]["structural_errors"] == [], (
+        "auto_fill should close the gap the previous request correctly caught"
+    )
 
 
 def test_plan_autofill_and_double_major_supported():

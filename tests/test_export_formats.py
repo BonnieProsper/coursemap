@@ -25,6 +25,7 @@ from coursemap.domain.prerequisite import (
     prereq_to_human,
 )
 from coursemap.export.ical import _escape_ical_text, plan_to_ical
+from tests.conftest import full_ui_text
 
 client = TestClient(app, raise_server_exceptions=True)
 
@@ -422,23 +423,23 @@ def test_ui_has_course_modal_markup():
     assert 'modal-search' in r.text
 
 def test_ui_has_validation_panel_markup():
-    r = client.get('/')
+    text = full_ui_text(client)
     # New UI uses val-panel class and renderValidationPanel function
-    assert 'val-panel' in r.text
-    assert 'renderValidationPanel' in r.text
+    assert 'val-panel' in text
+    assert 'renderValidationPanel' in text
 
 def test_ui_has_year_grouping_markup():
-    r = client.get('/')
+    text = full_ui_text(client)
     # New UI uses year-header class with year grouping logic
-    assert 'year-header' in r.text or 'year-label' in r.text
+    assert 'year-header' in text or 'year-label' in text
 
 def test_ui_has_mark_completed_markup():
-    r = client.get('/')
+    text = full_ui_text(client)
     # New UI uses markDone function and mark-done-btn class
-    assert 'markDone' in r.text or 'mark-done' in r.text
+    assert 'markDone' in text or 'mark-done' in text
 
 def test_ui_has_progress_bar_markup():
-    r = client.get('/')
+    text = full_ui_text(client)
     # New UI uses progress-wrap class and renderProgressBar function
-    assert 'progress-wrap' in r.text
-    assert 'renderProgressBar' in r.text
+    assert 'progress-wrap' in text
+    assert 'renderProgressBar' in text

@@ -237,7 +237,6 @@ def test_full_year_warning_in_plan_if_applicable():
     # the _plan_to_out function produces warnings when given a plan with full_year courses.
     from coursemap.api.server import _plan_to_out, _svc, PlanRequest
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from datetime import date
 
     svc = _svc()
     fy_course = courses[full_year_codes[0]]
@@ -445,38 +444,6 @@ def test_l200plus_missing_prereq_data_exposes_level_for_frontend_indicator():
     assert sample["prerequisite_expression"] is None
 
 
-# ── deadlock error message quality ───────────────────────────────────────────
-
-def test_deadlock_message_is_informative():
-    """Generating a plan with an impossible campus/mode combo raises a clear error."""
-    from coursemap.planner.generator import PlanGenerator
-    from coursemap.api.server import _svc
-
-    svc = _svc()
-    # Use a campus/mode that has no offerings for any CS course
-    try:
-        gen = PlanGenerator(
-            courses=svc.courses,
-            campus="W",  # Wellington, very few distance courses
-            mode="INT",
-            start_year=2026,
-            start_semester="S1",
-        )
-        # Try to schedule a course that has no Wellington INT offering
-        from coursemap.domain.course import Course
-        cs_major_codes = {"159101", "159201", "159301"}  # known CS codes
-        schedulable = {c: svc.courses[c] for c in cs_major_codes if c in svc.courses}
-        if not schedulable:
-            return  # nothing to test
-        # The deadlock message test just checks the ValueError has useful content
-        # We can't easily force a deadlock without full plan generation,
-        # so test the message format by checking the source
-        import inspect
-        source = inspect.getsource(gen._any_future_possible.__module__ + '.' if False else type(gen))
-    except Exception:
-        pass  # Generator may not have this method, acceptable
-
-
 def test_courses_semester_and_min_credits_combined():
     res = client.get("/api/courses?semester=S1&min_credits=1&limit=50")
     assert res.status_code == 200
@@ -583,7 +550,6 @@ def test_cache_version_is_set():
 # ── API version is 7.0.0 ──────────────────────────────────────────────────────
 
 def test_api_version():
-    res = client.get("/docs", follow_redirects=False)
     # FastAPI exposes version in openapi.json
     res2 = client.get("/openapi.json")
     assert res2.status_code == 200
@@ -782,7 +748,6 @@ def test_elective_filler_or_prereq_check():
     if either A or B is in the available set (not both required).
     """
     from coursemap.planner.elective_filler import ElectiveFiller
-    from coursemap.domain.course import Course, Offering
     from coursemap.domain.prerequisite import OrExpression, CoursePrerequisite
 
     prereq = OrExpression(children=[
@@ -808,7 +773,6 @@ def test_elective_filler_or_prereq_check():
 def test_elective_filler_and_prereq_check():
     """AND prereq requires ALL children to be in available set."""
     from coursemap.planner.elective_filler import ElectiveFiller
-    from coursemap.domain.course import Course, Offering
     from coursemap.domain.prerequisite import AndExpression, CoursePrerequisite
 
     prereq = AndExpression(children=[
@@ -852,7 +816,7 @@ def test_plan_meta_has_credits_prior():
 def test_prereq_codes_or_aware_or_expression():
     """OR node: only codes common to ALL branches are considered 'required'."""
     from coursemap.planner.generator import _prereq_codes_or_aware
-    from coursemap.domain.prerequisite import OrExpression, CoursePrerequisite, AndExpression
+    from coursemap.domain.prerequisite import OrExpression, CoursePrerequisite
 
     # OR(111, 222): neither is required by BOTH branches, so intersection is empty
     or_expr = OrExpression(children=[
@@ -1163,8 +1127,7 @@ def test_progress_zero_remaining_gives_zero_semesters():
     """When all 360cr are done, semesters remaining should be 0."""
     # We can't pass 360cr of completed courses easily, but we can check the
     # math: credits_remaining = 0 → sems_remaining = 0
-    from coursemap.api.server import _svc, _courses
-    svc = _svc()
+    from coursemap.api.server import _courses
     courses_map = _courses()
     # Get 24 courses worth of 15cr each (360cr total)
     cs_codes = [c for c, course in courses_map.items()
@@ -1350,7 +1313,6 @@ def test_scorer_penalises_s1_s2_imbalance():
     """A plan with balanced S1/S2 loads should score better than an imbalanced one."""
     from coursemap.optimisation.scorer import PlanScorer
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     def _fake_course(code, credits):
         return Course(code=code, title=code, credits=credits, level=100,
@@ -1390,7 +1352,6 @@ def test_scorer_empty_plan_returns_inf():
 def test_validator_accepts_valid_full_year_flag():
     """Offerings with full_year=True or False should pass validation."""
     from coursemap.validation.dataset_validator import check_offerings
-    from coursemap.domain.course import Course, Offering
 
     c = Course(
         code="TEST01", title="Test", credits=15, level=100,
@@ -1480,7 +1441,6 @@ def test_scorer_fewer_semesters_wins():
     """A plan with fewer semesters should score better than one with more (all else equal)."""
     from coursemap.optimisation.scorer import PlanScorer
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     def _c(code):
         return Course(code=code, title=code, credits=30, level=100,
@@ -1504,7 +1464,6 @@ def test_scorer_fewer_semesters_wins():
 def test_fees_no_duplicate_subject_keys():
     """fees.py dict must not have duplicate keys (Python silently overwrites them)."""
     import ast
-    from pathlib import Path
     src = (REPO_ROOT / "coursemap/domain/fees.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     for node in ast.walk(tree):
@@ -1557,7 +1516,6 @@ def test_select_free_electives_excludes_zero_credit():
     from coursemap.ingestion.dataset_loader import load_courses
     courses = load_courses()
     # Inject a zero-credit course into a copy of courses
-    from coursemap.domain.course import Course, Offering
     zero_cr = Course(code="ZZZ000", title="Zero Credit", credits=0, level=100,
                      offerings=(Offering(semester="S1", campus="D", mode="DIS"),))
     courses_with_zero = {**courses, "ZZZ000": zero_cr}
@@ -1595,10 +1553,8 @@ def test_select_free_electives_returns_within_gap():
 
 def test_cli_no_summer_default():
     """CLI plan --no-summer should default to True (same as API)."""
-    import argparse
-    import sys, importlib
+    import sys
     # Reload CLI to pick up fresh argument defaults
-    import coursemap.cli.main as cli_mod
     # Find plan_p and check default
     # We can test this by checking the argparse action stored default
     # Simplest: run CLI help and check
@@ -1714,7 +1670,6 @@ def test_min_level_credits_counts_prior_completed():
     """MinLevelCreditsRequirement.is_satisfied must count prior-completed courses."""
     from coursemap.domain.requirement_nodes import MinLevelCreditsRequirement
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     req = MinLevelCreditsRequirement(level=300, min_credits=45)
 
@@ -1743,7 +1698,6 @@ def test_min_level_credits_from_counts_prior():
     """MinLevelCreditsFromRequirement.is_satisfied counts prior-completed codes."""
     from coursemap.domain.requirement_nodes import MinLevelCreditsFromRequirement
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     allowed = ("AAA300", "BBB300")
     req = MinLevelCreditsFromRequirement(level=300, min_credits=30, course_codes=allowed)
@@ -1764,7 +1718,6 @@ def test_max_level_credits_counts_prior():
     """MaxLevelCreditsRequirement.is_satisfied counts prior-completed courses."""
     from coursemap.domain.requirement_nodes import MaxLevelCreditsRequirement
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     req = MaxLevelCreditsRequirement(level=100, max_credits=30)
 
@@ -1791,7 +1744,6 @@ def test_total_credits_includes_transfer():
     """TotalCreditsRequirement.is_satisfied includes transfer_credits."""
     from coursemap.domain.requirement_nodes import TotalCreditsRequirement
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     req = TotalCreditsRequirement(required_credits=360)
 
@@ -1819,7 +1771,7 @@ def test_total_credits_includes_transfer():
 def test_degree_plan_semesters_immutable_after_construction():
     """Reassigning DegreePlan.semesters after construction should raise AttributeError."""
     import pytest
-    from coursemap.domain.plan import DegreePlan, SemesterPlan
+    from coursemap.domain.plan import DegreePlan
 
     plan = DegreePlan(semesters=())
     with pytest.raises(AttributeError, match="stale"):
@@ -1829,7 +1781,6 @@ def test_degree_plan_semesters_immutable_after_construction():
 def test_degree_plan_all_course_codes_accurate():
     """all_course_codes must reflect semesters + prior_completed."""
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     def _c(code):
         return Course(code=code, title=code, credits=15, level=100,
@@ -1971,7 +1922,6 @@ def test_validator_no_false_cycles_from_or():
     there is no true cycle because X→Y works and Z→W works.
     """
     from coursemap.validation.dataset_validator import check_prerequisite_cycles
-    from coursemap.domain.course import Course, Offering
     from coursemap.domain.prerequisite import OrExpression, CoursePrerequisite
 
     off = (Offering(semester="S1", campus="D", mode="DIS"),)
@@ -1993,7 +1943,6 @@ def test_validator_no_false_cycles_from_or():
 def test_validator_detects_true_cycle():
     """A genuine AND cycle (A requires B AND B requires A) must be detected."""
     from coursemap.validation.dataset_validator import check_prerequisite_cycles
-    from coursemap.domain.course import Course, Offering
     from coursemap.domain.prerequisite import CoursePrerequisite
 
     off = (Offering(semester="S1", campus="D", mode="DIS"),)
@@ -2084,7 +2033,6 @@ def test_ical_uid_safe_chars_only():
     import re
     from coursemap.export.ical import plan_to_ical
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     plan = DegreePlan(semesters=(
         SemesterPlan(year=2026, semester="S1", courses=(
@@ -2103,7 +2051,6 @@ def test_ical_has_dtstamp():
     """Each VEVENT must have a DTSTAMP (RFC 5545 requirement)."""
     from coursemap.export.ical import plan_to_ical
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
     import re
 
     plan = DegreePlan(semesters=(
@@ -2123,8 +2070,6 @@ def test_ical_has_sequence():
     """Each VEVENT must have a SEQUENCE field."""
     from coursemap.export.ical import plan_to_ical
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
-    import re
 
     plan = DegreePlan(semesters=(
         SemesterPlan(year=2026, semester="S1", courses=(
@@ -2140,7 +2085,6 @@ def test_ical_no_double_crlf():
     """iCal output must not have double CRLF (malformed line endings)."""
     from coursemap.export.ical import plan_to_ical
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     plan = DegreePlan(semesters=(
         SemesterPlan(year=2026, semester="S1", courses=(
@@ -2156,7 +2100,6 @@ def test_ical_lines_within_75_octet_limit():
     """All non-continuation lines must be ≤75 octets (RFC 5545 §3.1)."""
     from coursemap.export.ical import plan_to_ical
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     plan = DegreePlan(semesters=(
         SemesterPlan(year=2026, semester="S1", courses=(
@@ -2494,9 +2437,6 @@ def test_generate_filled_double_major_plan_default_no_summer():
 def test_api_default_no_summer_is_true():
     """API PlanRequest should default no_summer=True."""
     from coursemap.api.server import PlanRequest
-    import inspect
-    sig = inspect.signature(PlanRequest)
-    # Pydantic Field defaults: check the model's default
     r = PlanRequest(major="Computer Science – Bachelor of Information Sciences")
     assert r.no_summer is True, f"Expected no_summer=True, got {r.no_summer}"
 
@@ -2556,18 +2496,17 @@ def test_ecology_bsc_requires_summer_school_at_distance():
         assert all(o.semester == "SS" for o in dist_offerings), \
             "123103 should only be offered DIS in Summer School"
 
-    # Planning with no_summer=True should fail
+    # Planning with no_summer=True should fail outright, or succeed without
+    # actually scheduling 123103 (its only distance offering is in Summer
+    # School, which is excluded).
     res_no_ss = client.post("/api/plan", json={
         "major": "Ecology and Conservation – Bachelor of Science",
         "no_summer": True,
         "auto_fill": True,
     })
-    # Should either fail (422/500) or succeed with a warning about 123103
     if res_no_ss.status_code == 200:
-        warnings = res_no_ss.json().get("warnings", [])
-        # If it succeeds, there should be some indication that something is off
-        # (the plan may omit 123103 and still validate if it's in a pool)
-        pass  # acceptable if the major's pool structure allows it
+        scheduled = {c["code"] for s in res_no_ss.json()["semesters"] for c in s["courses"]}
+        assert "123103" not in scheduled
 
     # Planning with no_summer=False should succeed
     res_with_ss = client.post("/api/plan", json={
@@ -2633,7 +2572,6 @@ def test_elective_sort_key_uses_campus_mode():
     from coursemap.optimisation.search import PlanSearch
     from coursemap.planner.generator import PlanGenerator
     from coursemap.ingestion.dataset_loader import load_courses
-    from coursemap.domain.course import Course, Offering
 
     courses = load_courses()
 
@@ -2833,6 +2771,33 @@ def test_api_plan_fees_endpoint():
     assert "by_year" in fees
 
 
+def test_api_plan_fees_confidence_and_excludes_present_for_ui():
+    """
+    Regression test: the UI (updateFeesConfidenceNote in app.js) now
+    fetches /api/plan/fees and displays the "confidence" string and
+    "excludes" list directly, having previously never called this
+    endpoint at all despite it already computing this information on
+    every request (see CHANGELOG.md).
+    If a future change to estimate_plan_fees drops or renames either
+    field, this test fails loudly instead of the UI silently showing
+    nothing where a confidence note used to be - a JS-side failure this
+    Python test suite otherwise has no way to catch.
+    """
+    plan_res = client.post("/api/plan", json={
+        "major": "Computer Science – Bachelor of Information Sciences",
+        "no_summer": True,
+        "auto_fill": True,
+    })
+    plan_id = plan_res.json()["plan_id"]
+
+    fees_res = client.post("/api/plan/fees", json={"plan_id": plan_id, "student_type": "domestic"})
+    assert fees_res.status_code == 200
+    fees = fees_res.json()
+    assert isinstance(fees.get("confidence"), str) and fees["confidence"]
+    assert isinstance(fees.get("excludes"), list) and fees["excludes"]
+    assert isinstance(fees.get("disclaimer"), str) and fees["disclaimer"]
+
+
 def test_api_plan_fees_endpoint_via_plan_id():
     """
     POST /api/plan/fees must accept a plan_id, matching the pattern every
@@ -2981,7 +2946,6 @@ def test_filter_requirement_tree_caps_pool_credits():
 
 def test_all_source_files_have_future_annotations():
     """All source files using modern type syntax must import __future__ annotations."""
-    from pathlib import Path
     B = REPO_ROOT
     # Directories that can legitimately live inside the repo tree but are
     # never *our* source: virtual environments (commonly created as .venv
@@ -3013,9 +2977,7 @@ def test_all_source_files_have_future_annotations():
 
 def test_exception_handler_returns_json_not_traceback():
     """Unhandled exceptions should return JSON 500, not raw Python traceback."""
-    from fastapi.testclient import TestClient
-    from fastapi import FastAPI
-    from coursemap.api.server import app, _global_exception_handler
+    from coursemap.api.server import app
 
     # Verify the handler is registered
     handlers = [h for h in app.exception_handlers if h is Exception]
@@ -3028,8 +2990,6 @@ def test_exception_handler_function_returns_json():
     import asyncio
     from coursemap.api.server import _global_exception_handler
     from fastapi import Request
-    from starlette.datastructures import Headers
-    from starlette.types import Scope
 
     scope = {
         "type": "http", "method": "GET", "path": "/api/test",
@@ -3096,14 +3056,12 @@ def test_api_gap_is_zero_when_plan_complete():
 # ── pyproject.toml version consistency ───────────────────────────────────────
 
 def test_pyproject_version_is_7():
-    from pathlib import Path
     import tomllib
     toml = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert toml["project"]["version"] == "7.0.0"
 
 
 def test_api_version_matches_pyproject():
-    from pathlib import Path
     import tomllib
     toml_v = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     api_v = client.get("/openapi.json").json()["info"]["version"]
@@ -3127,7 +3085,6 @@ def test_freshness_endpoint():
 # ── run_all_data_refresh.py has correct minor count ──────────────────────────
 
 def test_refresh_script_mentions_hot_reload():
-    from pathlib import Path
     script = (REPO_ROOT / "scripts/run_all_data_refresh.py").read_text(encoding="utf-8")
     assert "/api/reload" in script, "refresh script should mention /api/reload hot-reload option"
 
@@ -3146,17 +3103,15 @@ def test_build_gap_meta_returns_expected_keys():
 def test_build_gap_meta_catches_structural_shortfall_credit_count_misses():
     """
     Regression test for the gap between credit-count arithmetic and real
-    structural validation (see DATA_QUALITY.md / CHANGELOG.md "the CLI's
-    satisfied message doesn't mean what it looks like it means").
+    structural validation (see DATA_QUALITY.md / CHANGELOG.md).
 
     Originally demonstrated with Chemistry - Master of Science, whose
     "free electives" shortfall was itself a data bug (a stale placeholder
     pool sized against the qualification's old, wrong 240cr total - see
-    CHANGELOG.md "Fixed: the Chemistry/Mathematics MSc free-electives
-    shortfall, and 48 other majors sharing the same root cause"). Fixing
-    that data bug made Chemistry's plan genuinely complete, so it stopped
-    demonstrating the gap this test exists to catch. Animal Science -
-    Master of Science (M/INT) has the same shape for a different,
+    CHANGELOG.md). Fixing that data bug made Chemistry's plan genuinely
+    complete, so it stopped demonstrating the gap this test exists to
+    catch. Animal Science - Master of Science (M/INT) has the same shape
+    for a different,
     still-open reason (a named elective pool, not the free-electives
     catch-all, goes unfilled) and is used here instead.
 
@@ -3183,6 +3138,52 @@ def test_build_gap_meta_catches_structural_shortfall_credit_count_misses():
         "residual_gap (credit-count only) misses"
     )
     assert any("elective pool" in e.lower() for e in result["structural_errors"])
+
+
+def test_build_gap_meta_double_major_checks_both_trees():
+    """
+    Regression test for wiring up structural validation for double majors
+    (previously skipped entirely - see DATA_QUALITY.md/CHANGELOG.md).
+    Reuses the same pattern already proven safe in the dedicated
+    /api/validate endpoint's per-major loop: two independent
+    DegreeValidator calls, one per major's own tree, against the same
+    shared plan.
+
+    Deliberately constructs an artificial mismatch to prove the mechanism
+    reaches both trees, not just the first: uses a Computer Science -
+    BInfSci-only plan (from generate_best_plan, not the real double-major
+    generator) and manually sets "double_major" to Animal Science -
+    Master of Science, a real major with no relationship to that plan at
+    all. A real double-major plan (via generate_double_major_plan) is
+    generated specifically to satisfy both trees and would likely show no
+    errors for either - confirmed live via TestClient against the actual
+    /api/plan endpoint, not just asserted here. This test's artificial
+    mismatch exists purely to prove structural_errors is actually built
+    from BOTH trees when they disagree, not just the first - if the
+    double-major branch were silently skipping the second tree (the bug
+    this test guards against), no error mentioning Animal Science would
+    ever appear, regardless of how mismatched the plan is.
+    """
+    from coursemap.api.server import _build_gap_meta, _svc, PlanRequest
+
+    svc = _svc()
+    first_major = "Computer Science – Bachelor of Information Sciences"
+    second_major = "Animal Science – Master of Science"
+    plan = svc.generate_best_plan(first_major, campus="D", mode="DIS", no_summer=True)
+    req = PlanRequest(major=first_major, double_major=second_major, no_summer=True, auto_fill=False)
+    double_info = {"first_label": first_major, "second_label": second_major, "shared_codes": set(),
+                    "saved_credits": 0, "first_gap": 0, "second_gap": 0}
+
+    result = _build_gap_meta(plan, svc, req, first_major, double_info)
+
+    assert result["structural_errors"], (
+        "structural_errors should be non-empty: the plan doesn't satisfy "
+        "the second major's requirements at all"
+    )
+    assert any(second_major in e for e in result["structural_errors"]), (
+        "at least one error should be prefixed with the second major's "
+        "name, proving its tree was actually checked, not silently skipped"
+    )
 
 
 def test_build_gap_meta_zero_when_plan_complete():
@@ -3240,7 +3241,6 @@ def test_build_plan_warnings_full_year_detection():
     """_build_plan_warnings flags full-year courses correctly."""
     from coursemap.api.server import _build_plan_warnings, _svc, PlanRequest
     from coursemap.domain.plan import DegreePlan, SemesterPlan
-    from coursemap.domain.course import Course, Offering
 
     svc = _svc()
     req = PlanRequest(major="Computer Science – Bachelor of Information Sciences", no_summer=True)

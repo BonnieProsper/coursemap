@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from coursemap.api.server import app, _svc
+from tests.conftest import full_ui_text
 
 ROOT = Path(__file__).parent.parent
 client = TestClient(app, raise_server_exceptions=True)
@@ -173,7 +174,7 @@ class TestDoubleMajorHighlighting:
             assert code in all_codes, f"Shared code {code} not in plan"
 
     def test_ui_has_shared_code_badge_markup(self):
-        html = client.get("/").text
+        html = full_ui_text(client)
         assert "×2" in html
         assert "sharedCodes" in html
         assert "overlap" in html.lower() or "shared" in html.lower()
@@ -184,14 +185,14 @@ class TestDoubleMajorHighlighting:
 # ---------------------------------------------------------------------------
 
 def test_ui_has_massey_calendar_data():
-    html = client.get("/").text
+    html = full_ui_text(client)
     # New UI embeds calendar data inline in calMap object
     assert "Feb" in html
     assert "Jul" in html
     assert "Enrol by" in html
 
 def test_ui_semester_header_shows_cal_label():
-    html = client.get("/").text
+    html = full_ui_text(client)
     # New UI uses calMap and shows label in sem-head
     assert "calMap" in html or "cal.label" in html
     assert "Enrol by" in html
@@ -202,7 +203,7 @@ def test_ui_semester_header_shows_cal_label():
 # ---------------------------------------------------------------------------
 
 def test_ui_has_mobile_card_layout():
-    html = client.get("/").text
+    html = full_ui_text(client)
     # New UI has responsive mobile media queries
     assert "@media" in html
     assert "max-width" in html
@@ -214,7 +215,7 @@ def test_ui_has_mobile_card_layout():
 # ---------------------------------------------------------------------------
 
 def test_validation_pool_expansion_markup_in_ui():
-    html = client.get("/").text
+    html = full_ui_text(client)
     # New UI renders pool_codes from validation response
     assert "pool_codes" in html or "pool_peek" in html or "Elective pool" in html
 
@@ -280,12 +281,12 @@ def test_ui_has_start_semester_selector():
     assert 'value="SS"' in html
 
 def test_ui_auto_detects_semester():
-    html = client.get("/").text
+    html = full_ui_text(client)
     # New UI auto-detects semester with new Date() in init()
     assert "new Date()" in html
 
 def test_ui_start_semester_in_request_body():
-    html = client.get("/").text
+    html = full_ui_text(client)
     assert "start_semester:" in html
     # New UI uses getElementById('start-sem') or similar
     assert "start-sem" in html or "start-semester" in html

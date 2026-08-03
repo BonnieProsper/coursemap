@@ -1171,6 +1171,7 @@ def _cmd_plan(args: argparse.Namespace) -> None:
                 excluded_courses=excluded,
                 no_summer=args.no_summer,
                 transfer_credits=getattr(args, "transfer_credits", 0),
+                credits_override=getattr(args, "credits_override", None),
             )
         else:
             filler_codes = []
@@ -1187,6 +1188,7 @@ def _cmd_plan(args: argparse.Namespace) -> None:
                 excluded_courses=excluded,
                 no_summer=args.no_summer,
                 transfer_credits=getattr(args, "transfer_credits", 0),
+                credits_override=getattr(args, "credits_override", None),
             )
     except ValueError as exc:
         msg   = str(exc)
@@ -1293,6 +1295,10 @@ def _cmd_plan(args: argparse.Namespace) -> None:
     # ---- Terminal output ---------------------------------------------------
     _print_plan_header(major_label, args.start_year, args.campus, args.mode,
                        prior_completed, plan)
+    if not double_major and getattr(args, "credits_override", None) is None:
+        pathway_notice = svc.pathway_notice_for_major(args.major)
+        if pathway_notice:
+            print(f"NOTE:        {pathway_notice}")
     _print_exclusion_warnings(excl, args.mode, args.campus, student_excl_required)
 
     if double_info:
@@ -1305,7 +1311,41 @@ def _cmd_plan(args: argparse.Namespace) -> None:
                    svc=svc, major_name=args.major, campus=args.campus, mode=args.mode)
 
     if double_info:
-        print("\nBoth major requirements: satisfied")
+        # Previously an unconditional print regardless of whether it was
+        # true - never actually checked. Mirrors the API's
+        # _build_gap_meta double-major fix: two independent DegreeValidator
+        # calls, one per major's own tree, against the same shared plan
+        # (the same pattern already proven safe in the API's dedicated
+        # /api/validate endpoint). Restriction-conflict errors (plan-wide,
+        # not major-specific, byte-identical from both calls since
+        # _check_restriction_conflicts doesn't depend on the tree) are
+        # deduplicated rather than shown twice.
+        _double_structural_errors: list[str] = []
+        try:
+            from coursemap.validation.engine import DegreeValidator
+            _seen: set[str] = set()
+            for _name in (args.major, double_major):
+                _tree = svc.degree_tree_for_major(_name, campus=args.campus, mode=args.mode)
+                if _tree is None:
+                    continue
+                _result = DegreeValidator(_tree).validate(plan)
+                for _err in _result.errors:
+                    if _err in _seen:
+                        continue
+                    _seen.add(_err)
+                    if "restrict each other" in _err:
+                        _double_structural_errors.append(_err)
+                    else:
+                        _double_structural_errors.append(f"{_name}: {_err}")
+        except Exception:
+            pass
+
+        if _double_structural_errors:
+            print("\nBoth major requirements: NOT fully satisfied")
+            for _err in _double_structural_errors:
+                print(f"  ⚠ {_err}")
+        else:
+            print("\nBoth major requirements: satisfied")
     elif args.major:
         pass  # already printed inside _print_summary
     _print_elective_section(gap, auto_fill, filler_codes, courses, plan,
@@ -1666,6 +1706,12 @@ def main() -> None:
     plan_p.add_argument("--transfer-credits", dest="transfer_credits", type=int,
                         default=0, metavar="N",
                         help="Unspecified credit recognition from prior learning (e.g. 60).")
+    plan_p.add_argument("--credits-override", dest="credits_override", type=int,
+                        default=None, metavar="N",
+                        help="Plan against this total credits instead of the tool's "
+                             "default for the qualification. Use when your qualification's "
+                             "real total depends on prior study (e.g. Honours) - see "
+                             "DATA_QUALITY.md, 'Qualification credit totals'. Single major only.")
     plan_p.add_argument("--prefer", metavar="CODES",
                         help="Comma-separated elective course codes to prioritise.")
     plan_p.add_argument("--exclude", metavar="CODES",

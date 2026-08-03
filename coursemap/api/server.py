@@ -16,6 +16,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -94,6 +95,9 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Serves ui.html's external CSS/JS (coursemap/api/static/app.css, app.js).
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
 @app.exception_handler(Exception)
@@ -196,6 +200,15 @@ class PlanRequest(BaseModel):
     no_summer: bool = Field(True, description="Skip Summer School semesters.")
     auto_fill: bool = Field(False, description="Auto-fill free-elective gap with subject-area courses.")
     seed: int | None = Field(None, description="Random seed for deterministic plan generation. Returned in plan meta; use to reproduce a plan exactly.")
+    credits_override: int | None = Field(
+        None, ge=15, le=600,
+        description=(
+            "Plan against this total credits instead of the default for the "
+            "qualification. For a qualification whose real total depends on "
+            "prior study (see /api/majors/{name}/pathway-notice). Single-major "
+            "plans only; ignored for a double major."
+        ),
+    )
 
 
 class SemesterOut(BaseModel):
@@ -266,8 +279,11 @@ def _build_gap_meta(
     Returns a dict with keys: degree_total, raw_gap, residual_gap, gap_explanation.
     """
     major_name = req.major
-    gap          = svc.free_elective_gap(major_name, campus=req.campus, mode=req.mode)
-    degree_total = svc.degree_total_credits(major_name)
+    _co = None if req.double_major else req.credits_override
+    gap          = svc.free_elective_gap(
+        major_name, campus=req.campus, mode=req.mode, credits_override=_co,
+    )
+    degree_total = svc.degree_total_credits(major_name, credits_override=_co)
 
     # raw_gap: the major's structural gap (what the major data alone requires),
     # net of any transfer credits already counted toward the degree.
@@ -315,21 +331,53 @@ def _build_gap_meta(
     # pool separate from the major's own Part One/Two) is still unmet,
     # since it never checks the actual requirement tree. Run the real
     # DegreeValidator so a plan that hits the right total but fails a
-    # structural requirement doesn't get reported as complete. Skipped
-    # for double majors (no combined-tree validator exists yet) and
-    # silently skipped on any lookup failure - this is a best-effort
-    # extra check, not a replacement for the credit-count gap above, and
-    # must never turn into a 500 for a plan that already generated fine.
+    # structural requirement doesn't get reported as complete. Silently
+    # skipped on any lookup failure - this is a best-effort extra check,
+    # not a replacement for the credit-count gap above, and must never
+    # turn into a 500 for a plan that already generated fine.
+    #
+    # The open free-elective pool (DegreeValidator's "Free electives:
+    # have Xcr, need Ycr..." message) is excluded below ONLY for the
+    # single-major branch. degree_tree_for_major always validates with
+    # keep_open_pools=True, so for a single major this message fires
+    # unconditionally for every plan that hasn't been auto-filled - i.e.
+    # most single-major BSc/BA plans by design - and duplicates
+    # residual_gap/gap_explanation above with no extra information.
+    #
+    # For a double major it's kept: whether a given major's own pool
+    # ends up satisfied depends on how much the *other* major's
+    # requirements overlap it, so it's not guaranteed either way and
+    # genuinely signals which major (if either) still has a real gap -
+    # see test_plan_double_major_structural_errors_checks_both_majors.
     structural_errors: list[str] = []
-    if not double_info:
-        try:
+    try:
+        if double_info:
+            second_major_name = req.double_major
+            seen: set[str] = set()
+            for name in (resolved_name, second_major_name):
+                tree = svc.degree_tree_for_major(name, campus=req.campus, mode=req.mode)
+                if tree is None:
+                    continue
+                result = DegreeValidator(tree).validate(plan)
+                for err in result.errors:
+                    if err in seen:
+                        continue
+                    seen.add(err)
+                    if "restrict each other" in err:
+                        structural_errors.append(err)
+                    else:
+                        structural_errors.append(f"{name}: {err}")
+        else:
             tree = svc.degree_tree_for_major(resolved_name, campus=req.campus, mode=req.mode)
             if tree is not None:
                 result = DegreeValidator(tree).validate(plan)
                 if not result.passed:
-                    structural_errors = list(result.errors)
-        except Exception:
-            pass
+                    structural_errors = [
+                        err for err in result.errors
+                        if not err.startswith("Free electives:")
+                    ]
+    except Exception:
+        pass
 
     return {
         "degree_total":       degree_total,
@@ -474,6 +522,10 @@ def _plan_to_out(
     warnings = _build_plan_warnings(plan, svc, req, extra_warnings)
     for err in gap_info["structural_errors"]:
         warnings.append(f"⚠ Degree requirement not met: {err}")
+    if not req.double_major and req.credits_override is None:
+        pathway_notice = svc.pathway_notice_for_major(req.major)
+        if pathway_notice:
+            warnings.append(f"ℹ {pathway_notice}")
 
     dmi_out: dict | None = None
     if double_info:
@@ -534,10 +586,14 @@ def _execute_plan(req: PlanRequest, svc: PlannerService):
         return plan, [], double_info
 
     if req.auto_fill:
-        plan, filler = svc.generate_filled_plan(major_name=req.major, **common)
+        plan, filler = svc.generate_filled_plan(
+            major_name=req.major, credits_override=req.credits_override, **common
+        )
         return plan, list(filler), None
 
-    plan = svc.generate_best_plan(major_name=req.major, **common)
+    plan = svc.generate_best_plan(
+        major_name=req.major, credits_override=req.credits_override, **common
+    )
     return plan, [], None
 
 
@@ -905,6 +961,17 @@ def resolve_major(name: str = Query(..., description="Major name (partial match 
         "count":  len(resolved),
         "majors": [{"name": m["name"], "url": m.get("url", "")} for m in resolved],
     }
+
+
+@app.get("/api/majors/pathway-notice", summary="Check for a documented alternate credit total")
+def major_pathway_notice(name: str = Query(..., description="Major name (partial match accepted).")):
+    """
+    Return a student-facing notice if this major's qualification has a
+    documented, prior-study-dependent credit total (see DATA_QUALITY.md,
+    "Qualification credit totals"), or {"notice": null} if it doesn't.
+    """
+    svc = _svc()
+    return {"notice": svc.pathway_notice_for_major(name)}
 
 
 @app.get("/api/minors", summary="List or search minors")
